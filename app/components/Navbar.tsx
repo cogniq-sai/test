@@ -1,0 +1,41 @@
+import Link from "next/link";
+
+const Navbar = () => {
+    return (
+        <header className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-b border-gray-100">
+            <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+
+                {/* Logo / Brand */}
+                <Link href="/" className="flex items-center gap-2">
+                    <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-cyan-500 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/25">
+                        <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                        </svg>
+                    </div>
+                    <span className="text-xl font-bold text-gray-900">
+                        SEOFlow <span className="text-blue-600">AI</span>
+                    </span>
+                </Link>
+
+                {/* Actions */}
+                <nav className="flex items-center gap-3">
+                    <Link
+                        href="/login"
+                        className="px-4 py-2 text-sm font-medium text-gray-600"
+                    >
+                        Login
+                    </Link>
+
+                    <Link
+                        href="/login?mode=signup"
+                        className="px-5 py-2.5 text-sm font-semibold bg-gradient-to-r from-blue-600 to-cyan-500 text-white rounded-full"
+                    >
+                        Get Started Free
+                    </Link>
+                </nav>
+            </div>
+        </header>
+    );
+};
+
+export default Navbar;
