@@ -77,8 +77,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
                     // Get accurate page count from actual pages fetched
                     const hasPages = pagesResponse.success && pagesResponse.pages && Array.isArray(pagesResponse.pages) && pagesResponse.pages.length > 0;
-                    const totalPages = hasPages ? pagesResponse.pages.length : 
-                                      (pagesResponse.success && pagesResponse.total_pages > 0 ? pagesResponse.total_pages : 0);
+                    const totalPages = hasPages ? pagesResponse.pages.length :
+                        (pagesResponse.success && pagesResponse.total_pages > 0 ? pagesResponse.total_pages : 0);
 
                     // Get error count
                     const hasErrors = errorsResponse.success && errorsResponse.errors && Array.isArray(errorsResponse.errors) && errorsResponse.errors.length > 0;
@@ -103,19 +103,28 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
                     }
 
                     const activeScan = activeScansMap.get(site.id);
+
+                    // CRITICAL FIX: Only use activeScan progress if it's NOT in a terminal state
+                    // This prevents the "stuck at 99%" issue when the backend still has an old scan in memory.
+                    const isScanActive = activeScan &&
+                        activeScan.state !== 'completed' &&
+                        activeScan.state !== 'failed' &&
+                        activeScan.status !== 'completed' &&
+                        activeScan.status !== 'failed';
+
                     // Site is scanned if it has pages OR errors from past scans
                     const isScanned = totalPages > 0 || totalErrors > 0;
 
                     return {
                         ...site,
-                        scanProgress: activeScan ? activeScan.progress : (isScanned ? 100 : 0),
+                        scanProgress: isScanActive ? activeScan.progress : (isScanned ? 100 : 0),
                         lastActivity: lastActivity || site.lastActivity,
                         totalPages: totalPages,
                         totalErrors: totalErrors,
                         status: isScanned ? 'connected' as const : site.status,
-                        activeScanId: activeScan?.scan_id,
+                        activeScanId: isScanActive ? activeScan?.scan_id : undefined,
                         scanState: (() => {
-                            if (!activeScan) return undefined;
+                            if (!isScanActive) return isScanned ? 'completed' : undefined;
                             const rawState = (activeScan.state || activeScan.status || '').toLowerCase();
                             if (rawState === 'running') return 'in_progress';
                             if (rawState === 'paused') return 'paused';
@@ -206,7 +215,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
             // Cache validity check - reduce cache to 1 minute for fresher data
             const CACHE_DURATION = 1 * 60 * 1000; // 1 minute
             const timeSinceLastFetch = Date.now() - lastFetched;
-            
+
             // Always fetch on first load (lastFetched === 0) or if cache expired
             if (lastFetched === 0 || timeSinceLastFetch > CACHE_DURATION) {
                 refreshData();

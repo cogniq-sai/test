@@ -242,7 +242,12 @@ export default function SiteCard({ site, onDelete, token }: SiteCardProps) {
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                                                 </svg>
                                             ) : (
-                                                <span className="text-[10px] font-semibold text-gray-400">{progress}%</span>
+                                                <div className="flex flex-col items-center">
+                                                    <span className="text-[10px] font-semibold text-gray-400">{progress}%</span>
+                                                    {progress >= 95 && (
+                                                        <span className="text-[6px] font-bold text-blue-500 animate-pulse whitespace-nowrap">FINISHING...</span>
+                                                    )}
+                                                </div>
                                             )}
                                         </div>
                                     </div>
@@ -259,8 +264,8 @@ export default function SiteCard({ site, onDelete, token }: SiteCardProps) {
                                     onClick={site.scanState === 'paused' ? handleResumeScan : handlePauseScan}
                                     disabled={isPauseResumeLoading || isStopLoading}
                                     className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${site.scanState === 'paused'
-                                            ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm'
-                                            : 'bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200'
+                                        ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm'
+                                        : 'bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200'
                                         } disabled:opacity-50 disabled:cursor-not-allowed`}
                                     title={site.scanState === 'paused' ? 'Resume scan' : 'Pause scan'}
                                 >
