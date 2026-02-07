@@ -198,9 +198,11 @@ export default function SiteCard({ site, onDelete, token }: SiteCardProps) {
                         <div className="relative flex items-center justify-center">
                             {/* Calculate progress: 0% = not scanned, 100% = scanned */}
                             {(() => {
-                                const progress = site.scanProgress !== undefined
-                                    ? site.scanProgress
-                                    : (isScanned ? 100 : 0);
+                                const progress = site.scanState === 'completed'
+                                    ? 100
+                                    : site.scanProgress !== undefined
+                                        ? site.scanProgress
+                                        : (isScanned ? 100 : 0);
                                 const radius = 16;
                                 const circumference = 2 * Math.PI * radius;
                                 const offset = circumference - (progress / 100) * circumference;
