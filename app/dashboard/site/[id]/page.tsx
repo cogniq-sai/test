@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "../../../context/AuthContext";
 import { useDashboard } from "../../../context/DashboardContext";
 import RedirectTable from "../../../components/dashboard/RedirectTable";
-import { getSites, deleteSite, removeStoredSite, getScanErrors, getAllPages } from "../../../lib/api";
+import { getSites, deleteSite, removeStoredSite, getScanErrors, getAllPages, generateRedirects, getRedirectSuggestions, selectRedirectOption, rejectSuggestion } from "../../../lib/api";
+import type { RedirectSuggestion } from "../../../lib/api";
 import ScannerCard from "../../../components/dashboard/ScannerCard";
 
 interface SiteInfo {
@@ -14,18 +15,6 @@ interface SiteInfo {
     url: string;        // Original full URL for API calls
     displayUrl: string; // Clean URL for UI display
     status: "connected" | "pending" | "disconnected";
-}
-
-interface RedirectData {
-    id: string;
-    sourceUrl: string;
-    suggestedTarget: string;
-    confidence: number;
-    aiReasoning: string;
-    status: "pending" | "approved" | "rejected";
-    detectedAt: string;
-    errorType: "internal" | "external" | "standard";
-    statusCode: number;
 }
 
 interface CrawledPage {
@@ -36,6 +25,7 @@ interface CrawledPage {
 }
 
 type ScanState = "idle" | "scanning" | "completed";
+type AiAnalysisState = "idle" | "analyzing" | "completed" | "error";
 
 export default function SiteDashboardPage() {
     const router = useRouter();
@@ -46,12 +36,18 @@ export default function SiteDashboardPage() {
     const [scanState, setScanState] = useState<ScanState>("idle");
     const [scanProgress, setScanProgress] = useState(0);
     const [pages, setPages] = useState<CrawledPage[]>([]);
-    const [redirects, setRedirects] = useState<RedirectData[]>([]);
     const [isPagesExpanded, setIsPagesExpanded] = useState(false);
     const [isRedirectsExpanded, setIsRedirectsExpanded] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [deleteError, setDeleteError] = useState<string | null>(null);
+
+    // AI Redirect Suggestions state
+    const [aiAnalysisState, setAiAnalysisState] = useState<AiAnalysisState>("idle");
+    const [aiSuggestions, setAiSuggestions] = useState<RedirectSuggestion[]>([]);
+    const [redirectActionLoading, setRedirectActionLoading] = useState(false);
+    const [errorCount, setErrorCount] = useState(0);
+    const aiPollRef = useRef<NodeJS.Timeout | null>(null);
     const [isCheckingData, setIsCheckingData] = useState(true); // Loading state for initial data check
 
     // Pagination State
@@ -92,6 +88,69 @@ export default function SiteDashboardPage() {
         }
     }, [siteId, user?.id, isAuthenticated]);
 
+    // Fetch existing AI suggestions for a site
+    const fetchAiSuggestions = useCallback(async () => {
+        if (!siteId || !token) return;
+        try {
+            const response = await getRedirectSuggestions(token, siteId);
+            if (response.success && response.suggestions.length > 0) {
+                setAiSuggestions(response.suggestions);
+                setAiAnalysisState("completed");
+                return true;
+            }
+            return false;
+        } catch (error) {
+            console.error("Failed to fetch AI suggestions:", error);
+            return false;
+        }
+    }, [siteId, token]);
+
+    // Trigger AI generation and start polling
+    const triggerAiGeneration = useCallback(async () => {
+        if (!siteId || !token) return;
+        try {
+            setAiAnalysisState("analyzing");
+            const response = await generateRedirects(token, siteId);
+            if (!response.success) {
+                // No broken links or error
+                setAiAnalysisState("idle");
+                return;
+            }
+            // Start polling for results
+            let pollCount = 0;
+            const maxPolls = 60; // 5 min max (5s * 60)
+            aiPollRef.current = setInterval(async () => {
+                pollCount++;
+                try {
+                    const suggestionsRes = await getRedirectSuggestions(token, siteId);
+                    if (suggestionsRes.success && suggestionsRes.suggestions.length > 0) {
+                        setAiSuggestions(suggestionsRes.suggestions);
+                        setAiAnalysisState("completed");
+                        if (aiPollRef.current) clearInterval(aiPollRef.current);
+                    } else if (pollCount >= maxPolls) {
+                        setAiAnalysisState("error");
+                        if (aiPollRef.current) clearInterval(aiPollRef.current);
+                    }
+                } catch {
+                    if (pollCount >= maxPolls) {
+                        setAiAnalysisState("error");
+                        if (aiPollRef.current) clearInterval(aiPollRef.current);
+                    }
+                }
+            }, 5000);
+        } catch (error) {
+            console.error("Failed to trigger AI generation:", error);
+            setAiAnalysisState("error");
+        }
+    }, [siteId, token]);
+
+    // Cleanup AI polling on unmount
+    useEffect(() => {
+        return () => {
+            if (aiPollRef.current) clearInterval(aiPollRef.current);
+        };
+    }, []);
+
     // Always try to fetch existing scan data when page loads
     useEffect(() => {
         const checkExistingScanData = async () => {
@@ -101,7 +160,7 @@ export default function SiteDashboardPage() {
             }
 
             try {
-                // Try to fetch existing pages and errors
+                // Try to fetch existing pages, errors, and AI suggestions
                 const [pagesResponse, errorsResponse] = await Promise.all([
                     getAllPages(siteId),
                     getScanErrors(token, siteId)
@@ -112,7 +171,6 @@ export default function SiteDashboardPage() {
 
                 // Only show completed state if there's actual data from a previous scan
                 if (hasPages || hasErrors) {
-                    // Site has been scanned before, show completed state
                     setScanState("completed");
 
                     if (hasPages) {
@@ -126,24 +184,14 @@ export default function SiteDashboardPage() {
                     }
 
                     if (hasErrors) {
-                        const mappedResults: RedirectData[] = errorsResponse.errors.map(err => ({
-                            id: err.id,
-                            sourceUrl: err.broken_url,
-                            suggestedTarget: "",
-                            confidence: 0,
-                            aiReasoning: `Found on page: ${err.source_url}`,
-                            status: "pending",
-                            detectedAt: err.created_at,
-                            errorType: err.error_type as any,
-                            statusCode: err.status_code
-                        }));
-                        setRedirects(mappedResults);
+                        setErrorCount(errorsResponse.errors.length);
                     }
+
+                    // Load existing AI suggestions
+                    await fetchAiSuggestions();
                 }
-                // If no data exists, stay in idle state (show "Start Scan" button)
             } catch (error) {
                 console.error("Failed to check existing scan data:", error);
-                // If fetch fails, stay in idle state
             } finally {
                 setIsCheckingData(false);
             }
@@ -154,14 +202,13 @@ export default function SiteDashboardPage() {
         } else {
             setIsCheckingData(false);
         }
-    }, [siteId, token, isAuthenticated]);
+    }, [siteId, token, isAuthenticated, fetchAiSuggestions]);
 
     const fetchDiscoveredPages = async () => {
         if (!siteId) return;
         try {
             const response = await getAllPages(siteId);
             if (response.success) {
-                // 1. Process All Crawled Pages
                 const mappedPages: CrawledPage[] = response.pages.map((p: any) => ({
                     url: p.url,
                     title: p.title,
@@ -169,56 +216,25 @@ export default function SiteDashboardPage() {
                     crawledAt: p.crawledAt || p.crawled_at || p.created_at || p.last_updated
                 }));
                 setPages(mappedPages);
-
-                // 2. Filter 404s for Broken Link Review
-                const brokenPages = response.pages.filter((p: any) =>
-                    p.status_code === 404 ||
-                    p.status === 'broken' ||
-                    (p.statusCode === 404)
-                );
-
-                if (brokenPages.length > 0) {
-                    const mappedRedirects: RedirectData[] = brokenPages.map((p: any, index: number) => ({
-                        id: p.id || `broken-${index}`,
-                        sourceUrl: p.url,
-                        suggestedTarget: "",
-                        confidence: 0,
-                        aiReasoning: "Detected as 404 Not Found",
-                        status: "pending",
-                        detectedAt: p.last_updated || new Date().toISOString(),
-                        errorType: "external", // Defaulting to external for now as we don't have this detail
-                        statusCode: 404
-                    }));
-                    setRedirects(mappedRedirects);
-                }
             }
         } catch (error) {
             console.error("Failed to fetch discovered pages:", error);
         }
     };
 
-    const fetchScanResults = async () => {
-        if (!token || !siteId) return;
+    const fetchScanResults = async (): Promise<number> => {
+        if (!token || !siteId) return 0;
         try {
             const response = await getScanErrors(token, siteId);
             if (response.success) {
-                // Map API results to the RedirectData structure
-                const mappedResults: RedirectData[] = response.errors.map(err => ({
-                    id: err.id,
-                    sourceUrl: err.broken_url, // broken_url is the actual 404 URL
-                    suggestedTarget: "",
-                    confidence: 0,
-                    aiReasoning: `Found on page: ${err.source_url}`,
-                    status: "pending",
-                    detectedAt: err.created_at,
-                    errorType: err.error_type as any,
-                    statusCode: err.status_code
-                }));
-                setRedirects(mappedResults);
+                const count = response.errors.length;
+                setErrorCount(count);
+                return count;
             }
         } catch (error) {
             console.error("Failed to fetch scan results:", error);
         }
+        return 0;
     };
 
     useEffect(() => {
@@ -228,19 +244,27 @@ export default function SiteDashboardPage() {
         }
     }, [scanState]);
 
-    const handleScanComplete = () => {
+    const handleScanComplete = async () => {
         setScanState("completed");
-        fetchScanResults();
+        const foundErrors = await fetchScanResults();
         fetchDiscoveredPages();
-        refreshData(); // Sync with dashboard cache
+        refreshData();
+
+        // Auto-trigger AI redirect generation if 404s were found
+        if (foundErrors > 0) {
+            triggerAiGeneration();
+        }
     };
 
     const handleStartScan = () => {
         setScanState("scanning");
         setScanProgress(0);
-        setPages([]); // Clear old results
-        setRedirects([]);
-        refreshData(); // Sync with dashboard cache ("in_progress")
+        setPages([]);
+        setAiSuggestions([]);
+        setAiAnalysisState("idle");
+        setErrorCount(0);
+        if (aiPollRef.current) clearInterval(aiPollRef.current);
+        refreshData();
     };
 
     const handleDeleteSite = async () => {
@@ -261,25 +285,53 @@ export default function SiteDashboardPage() {
         }
     };
 
-    const handleApprove = (id: string) => {
-        setRedirects(prev => prev.map(r => r.id === id ? { ...r, status: "approved" as const } : r));
+    const handleApprove = async (id: string, option: "primary" | "alternative") => {
+        if (!token) return;
+        setRedirectActionLoading(true);
+        try {
+            await selectRedirectOption(token, id, option);
+            setAiSuggestions(prev => prev.map(s => s.id === id ? { ...s, status: "approved", selected_option: option } : s));
+        } catch (error) {
+            console.error("Failed to approve redirect:", error);
+        } finally {
+            setRedirectActionLoading(false);
+        }
     };
 
-    const handleReject = (id: string) => {
-        setRedirects(prev => prev.map(r => r.id === id ? { ...r, status: "rejected" as const } : r));
+    const handleReject = async (id: string) => {
+        if (!token) return;
+        setRedirectActionLoading(true);
+        try {
+            await rejectSuggestion(token, id);
+            setAiSuggestions(prev => prev.map(s => s.id === id ? { ...s, status: "rejected" } : s));
+        } catch (error) {
+            console.error("Failed to reject redirect:", error);
+        } finally {
+            setRedirectActionLoading(false);
+        }
     };
 
-    const handleEdit = (id: string, newTarget: string) => {
-        setRedirects(prev => prev.map(r => r.id === id ? { ...r, suggestedTarget: newTarget } : r));
+    const handleEditCustom = async (id: string, customUrl: string) => {
+        if (!token) return;
+        setRedirectActionLoading(true);
+        try {
+            await selectRedirectOption(token, id, "custom", customUrl);
+            setAiSuggestions(prev => prev.map(s => s.id === id ? { ...s, status: "approved", selected_option: "custom", custom_redirect_url: customUrl } : s));
+        } catch (error) {
+            console.error("Failed to set custom redirect:", error);
+        } finally {
+            setRedirectActionLoading(false);
+        }
     };
 
     // Calculate stats
     const stats = {
         totalPages: pages.length,
-        total404s: redirects.length,
-        pendingReviews: redirects.filter(r => r.status === "pending").length,
-        approved: redirects.filter(r => r.status === "approved").length,
-        rejected: redirects.filter(r => r.status === "rejected").length
+        total404s: errorCount,
+        aiSuggestionsCount: aiSuggestions.length,
+        pendingReviews: aiSuggestions.filter(s => s.status === "pending").length,
+        approved: aiSuggestions.filter(s => s.status === "approved").length,
+        rejected: aiSuggestions.filter(s => s.status === "rejected").length
     };
 
     if (isLoading || isCheckingData) {
@@ -458,6 +510,55 @@ export default function SiteDashboardPage() {
                             </div>
                         </div>
 
+                        {/* ===== AI ANALYZING BANNER ===== */}
+                        {aiAnalysisState === "analyzing" && (
+                            <div className="bg-gradient-to-r from-purple-50 via-blue-50 to-cyan-50 backdrop-blur-xl rounded-2xl shadow-lg shadow-purple-200/30 border border-purple-100/60 p-6 mb-6 overflow-hidden relative">
+                                {/* Animated background shimmer */}
+                                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent animate-pulse" style={{ animationDuration: '2s' }}></div>
+                                <div className="relative flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-blue-500 rounded-xl flex items-center justify-center shadow-lg shadow-purple-500/25 flex-shrink-0">
+                                        <svg className="w-6 h-6 text-white animate-spin" style={{ animationDuration: '2s' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                                            AI is analyzing your broken links
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded-full">
+                                                <span className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-pulse"></span>
+                                                Processing
+                                            </span>
+                                        </h3>
+                                        <p className="text-sm text-gray-600 mt-1">
+                                            Generating intelligent redirect suggestions for {errorCount} broken link{errorCount !== 1 ? 's' : ''}. This may take a moment...
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {aiAnalysisState === "error" && (
+                            <div className="bg-red-50 rounded-2xl shadow-lg border border-red-100 p-6 mb-6">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                                        <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                    </div>
+                                    <div className="flex-1">
+                                        <h3 className="text-base font-semibold text-red-900">AI analysis encountered an issue</h3>
+                                        <p className="text-sm text-red-700 mt-1">Suggestions may still be generating. You can try again or check back later.</p>
+                                    </div>
+                                    <button
+                                        onClick={triggerAiGeneration}
+                                        className="px-4 py-2 text-sm font-medium text-red-700 bg-red-100 hover:bg-red-200 rounded-xl transition-colors"
+                                    >
+                                        Retry
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
                         {/* ===== ACCORDION 1: Broken Link Review ===== */}
                         <div className="bg-white/90 backdrop-blur-xl rounded-2xl shadow-lg shadow-gray-200/50 border border-white/60 overflow-hidden mb-6">
                             {/* Accordion Header */}
@@ -476,22 +577,48 @@ export default function SiteDashboardPage() {
                                         <div className="flex-1">
                                             <div className="flex items-center gap-3">
                                                 <h3 className="text-base font-semibold text-gray-900">Broken Link Review</h3>
-                                                {redirects.length > 0 && (
+                                                {aiSuggestions.length > 0 && (
                                                     <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 bg-orange-100 text-orange-700 text-sm font-medium rounded-md">
                                                         {stats.pendingReviews}
+                                                    </span>
+                                                )}
+                                                {aiAnalysisState === "analyzing" && (
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-full">
+                                                        <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>
+                                                        Analyzing
                                                     </span>
                                                 )}
                                             </div>
                                             {!isRedirectsExpanded && (
                                                 <p className="text-sm text-gray-500 mt-0.5">
-                                                    View and manage broken link issues
+                                                    {aiSuggestions.length > 0
+                                                        ? `${stats.pendingReviews} pending review · ${stats.approved} approved · ${stats.rejected} rejected`
+                                                        : errorCount > 0
+                                                            ? aiAnalysisState === "analyzing" ? "AI is generating suggestions..." : "Trigger AI analysis to get redirect suggestions"
+                                                            : "No broken links found — your site is healthy!"
+                                                    }
                                                 </p>
                                             )}
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-2 text-gray-500 hover:text-gray-700 transition-colors">
+                                    <div className="flex items-center gap-3">
+                                        {/* Manual trigger button if not already analyzing and has errors but no suggestions */}
+                                        {errorCount > 0 && aiSuggestions.length === 0 && aiAnalysisState === "idle" && (
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    triggerAiGeneration();
+                                                }}
+                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg transition-colors"
+                                            >
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                                                </svg>
+                                                Generate AI Suggestions
+                                            </button>
+                                        )}
                                         <svg
-                                            className={`w-5 h-5 transition-transform duration-300 ${isRedirectsExpanded ? 'rotate-180' : ''}`}
+                                            className={`w-5 h-5 text-gray-500 transition-transform duration-300 ${isRedirectsExpanded ? 'rotate-180' : ''}`}
                                             fill="none"
                                             stroke="currentColor"
                                             viewBox="0 0 24 24"
@@ -504,27 +631,46 @@ export default function SiteDashboardPage() {
 
                             {/* Collapsible Content */}
                             <div
-                                className={`transition-all duration-300 ease-in-out overflow-hidden ${isRedirectsExpanded ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}
+                                className={`transition-all duration-300 ease-in-out overflow-hidden ${isRedirectsExpanded ? 'max-h-[4000px] opacity-100' : 'max-h-0 opacity-0'}`}
                             >
                                 <div className="border-t border-gray-100 p-6">
-                                    {redirects.length === 0 ? (
+                                    {aiSuggestions.length === 0 && aiAnalysisState !== "analyzing" ? (
                                         <div className="flex flex-col items-center justify-center py-12">
                                             <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
                                                 <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                                                 </svg>
                                             </div>
-                                            <h3 className="text-lg font-semibold text-gray-900 mb-2">No broken links detected</h3>
+                                            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                                                {errorCount > 0 ? "No AI suggestions generated yet" : "No broken links detected"}
+                                            </h3>
                                             <p className="text-gray-600 text-center max-w-md">
-                                                No 404 errors or redirect suggestions have been detected for this site yet.
+                                                {errorCount > 0
+                                                    ? "Click \"Generate AI Suggestions\" above to get intelligent redirect recommendations for your broken links."
+                                                    : "Your site is running smoothly! No 404 errors have been detected."
+                                                }
+                                            </p>
+                                        </div>
+                                    ) : aiAnalysisState === "analyzing" && aiSuggestions.length === 0 ? (
+                                        <div className="flex flex-col items-center justify-center py-12">
+                                            <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mb-4">
+                                                <svg className="w-8 h-8 text-purple-500 animate-spin" style={{ animationDuration: '2s' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                                </svg>
+                                            </div>
+                                            <h3 className="text-lg font-semibold text-gray-900 mb-2">AI is working on it...</h3>
+                                            <p className="text-gray-600 text-center max-w-md">
+                                                Analyzing {errorCount} broken link{errorCount !== 1 ? 's' : ''} and generating redirect suggestions. This typically takes 10-30 seconds.
                                             </p>
                                         </div>
                                     ) : (
                                         <RedirectTable
-                                            redirects={redirects}
+                                            suggestions={aiSuggestions}
+                                            siteUrl={siteInfo?.url}
                                             onApprove={handleApprove}
                                             onReject={handleReject}
-                                            onEdit={handleEdit}
+                                            onEditCustom={handleEditCustom}
+                                            isLoading={redirectActionLoading}
                                         />
                                     )}
                                 </div>

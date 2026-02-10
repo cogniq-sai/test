@@ -11,6 +11,7 @@ export interface Site {
     lastActivity?: string;
     createdAt: string;
     totalPages?: number;
+    totalErrors?: number;
     scanProgress?: number; // 0-100 for demo purposes
     activeScanId?: string;
     scanState?: "completed" | "in_progress" | "failed" | "pending" | "paused";
@@ -48,6 +49,7 @@ export async function getSites(userId: string): Promise<GetSitesResponse> {
                 last_verified_at?: string;
                 created_at?: string;
                 total_pages?: number;
+                total_404s?: number;
             }>;
         }>(`/sites/list/${userId}`);
 
@@ -59,6 +61,7 @@ export async function getSites(userId: string): Promise<GetSitesResponse> {
             lastActivity: site.last_verified_at,
             createdAt: site.created_at || new Date().toISOString(),
             totalPages: site.total_pages || 0,
+            totalErrors: site.total_404s || 0,
         }));
 
         return { success: true, sites, count: sites.length };

@@ -64,6 +64,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
             const enrichedSitesPromises = sitesResponse.sites.map(async (site) => {
                 try {
                     // Fetch both pages and errors in parallel for complete picture
+                    // This is a WORKAROUND because the backend site listing has field name mismatches
                     const [pagesResponse, errorsResponse] = await Promise.all([
                         getAllPages(site.id).catch((err) => {
                             console.warn(`Failed to fetch pages for site ${site.id}:`, err.message);
@@ -80,9 +81,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
                     const totalPages = hasPages ? pagesResponse.pages.length :
                         (pagesResponse.success && pagesResponse.total_pages > 0 ? pagesResponse.total_pages : 0);
 
-                    // Get error count
+                    // Get error count - Prefer the direct API response over the potentially broken site.totalErrors
                     const hasErrors = errorsResponse.success && errorsResponse.errors && Array.isArray(errorsResponse.errors) && errorsResponse.errors.length > 0;
-                    const totalErrors = hasErrors ? errorsResponse.errors.length : 0;
+                    const totalErrors = hasErrors ? errorsResponse.errors.length : (site.totalErrors || 0);
 
                     // Log for debugging
                     if (totalPages > 0 || totalErrors > 0) {
@@ -156,7 +157,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
             let scannedSitesCount = 0;
 
             enrichedSites.forEach(site => {
-                total404s += (site as any).totalErrors || 0;
+                total404s += site.totalErrors || 0;
                 totalPagesCount += site.totalPages || 0;
                 if (site.status === 'connected') scannedSitesCount++;
             });
@@ -189,7 +190,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
                         siteName: site.url.replace(/^https?:\/\//, '').replace(/\/$/, ''),
                         siteUrl: site.url,
                         timestamp: site.lastActivity,
-                        details: `${(site as any).totalErrors || 0} issues found`,
+                        details: `${site.totalErrors || 0} issues found`,
                     });
                 }
             });
