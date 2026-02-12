@@ -21,28 +21,24 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-    const [user, setUser] = useState<User | null>(null);
-    const [token, setToken] = useState<string | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
-    const router = useRouter();
-
-    // Load auth state from localStorage on mount
-    useEffect(() => {
-        const storedToken = localStorage.getItem("auth_token");
-        const storedUser = localStorage.getItem("auth_user");
-
-        if (storedToken && storedUser && storedUser !== "undefined") {
-            try {
-                setToken(storedToken);
-                setUser(JSON.parse(storedUser));
-            } catch (e) {
-                // Invalid JSON in localStorage, clear it
-                localStorage.removeItem("auth_token");
-                localStorage.removeItem("auth_user");
-            }
+    // Initialize state directly from localStorage to prevent race condition
+    // that causes auto-logout when navigating between pages
+    const [user, setUser] = useState<User | null>(() => {
+        if (typeof window === "undefined") return null;
+        try {
+            const stored = localStorage.getItem("auth_user");
+            return stored && stored !== "undefined" ? JSON.parse(stored) : null;
+        } catch {
+            localStorage.removeItem("auth_user");
+            return null;
         }
-        setIsLoading(false);
-    }, []);
+    });
+    const [token, setToken] = useState<string | null>(() => {
+        if (typeof window === "undefined") return null;
+        return localStorage.getItem("auth_token");
+    });
+    const [isLoading, setIsLoading] = useState(false);
+    const router = useRouter();
 
     const login = (newToken: string, newUser: User) => {
         setToken(newToken);
