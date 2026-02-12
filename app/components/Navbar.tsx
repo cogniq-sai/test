@@ -1,6 +1,11 @@
+"use client";
+
 import Link from "next/link";
+import { useAuth } from "../context/AuthContext";
 
 const Navbar = () => {
+    const { isAuthenticated, isInitializing } = useAuth();
+
     return (
         <header className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-b border-gray-100">
             <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
@@ -19,19 +24,30 @@ const Navbar = () => {
 
                 {/* Actions */}
                 <nav className="flex items-center gap-3">
-                    <Link
-                        href="/login"
-                        className="px-4 py-2 text-sm font-medium text-gray-600"
-                    >
-                        Login
-                    </Link>
+                    {!isInitializing && isAuthenticated ? (
+                        <Link
+                            href="/dashboard"
+                            className="px-6 py-2.5 text-sm font-bold bg-gradient-to-r from-blue-600 to-cyan-500 text-white rounded-full shadow-lg shadow-blue-500/25 hover:opacity-90 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                        >
+                            Go to Dashboard
+                        </Link>
+                    ) : (
+                        <>
+                            <Link
+                                href="/login"
+                                className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
+                            >
+                                Login
+                            </Link>
 
-                    <Link
-                        href="/login?mode=signup"
-                        className="px-5 py-2.5 text-sm font-semibold bg-gradient-to-r from-blue-600 to-cyan-500 text-white rounded-full"
-                    >
-                        Get Started Free
-                    </Link>
+                            <Link
+                                href="/login?mode=signup"
+                                className="px-5 py-2.5 text-sm font-semibold bg-gradient-to-r from-blue-600 to-cyan-500 text-white rounded-full shadow-lg shadow-blue-500/25 hover:opacity-90 transition-all"
+                            >
+                                Get Started Free
+                            </Link>
+                        </>
+                    )}
                 </nav>
             </div>
         </header>

@@ -1,4 +1,11 @@
+"use client";
+
+import { useAuth } from "../context/AuthContext";
+import Link from "next/link";
+
 const HeroSection = () => {
+    const { isAuthenticated, isInitializing } = useAuth();
+
     return (
         <section className="min-h-screen flex items-center relative overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-cyan-50">
 
@@ -38,15 +45,27 @@ const HeroSection = () => {
 
                     {/* CTA Buttons */}
                     <div className="mt-10 flex flex-wrap gap-4">
-                        <a
-                            href="/login"
-                            className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-blue-600 to-cyan-500 text-white rounded-xl font-semibold text-lg"
-                        >
-                            Login to Dashboard
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-                            </svg>
-                        </a>
+                        {!isInitializing && isAuthenticated ? (
+                            <Link
+                                href="/dashboard"
+                                className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-blue-600 to-cyan-500 text-white rounded-xl font-bold text-lg shadow-lg shadow-blue-500/25 hover:shadow-xl transition-all hover:scale-[1.02] active:scale-[0.98]"
+                            >
+                                Go to Dashboard
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                                </svg>
+                            </Link>
+                        ) : (
+                            <Link
+                                href="/login"
+                                className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-blue-600 to-cyan-500 text-white rounded-xl font-semibold text-lg hover:opacity-90 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                            >
+                                Login to Dashboard
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                                </svg>
+                            </Link>
+                        )}
 
                         <button className="inline-flex items-center gap-2 px-8 py-4 bg-white border-2 border-gray-200 rounded-xl text-gray-700 font-semibold text-lg">
                             <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 24 24">

@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Suspense } from "react";
 import { login as apiLogin, signup as apiSignup } from "@/app/lib/api/auth";
 import { useAuth } from "../context/AuthContext";
@@ -41,7 +41,15 @@ function AuthContent() {
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-    const { login } = useAuth();
+    const { login, isAuthenticated, isInitializing } = useAuth();
+    const router = useRouter();
+
+    // Redirect if already authenticated
+    useEffect(() => {
+        if (!isInitializing && isAuthenticated) {
+            router.push("/dashboard");
+        }
+    }, [isInitializing, isAuthenticated, router]);
 
     // Password strength
     const passwordStrength = useMemo(() => calculatePasswordStrength(password), [password]);

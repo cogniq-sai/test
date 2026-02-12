@@ -6,15 +6,17 @@ import Link from "next/link";
 import { useAuth } from "../../../context/AuthContext";
 import { useDashboard } from "../../../context/DashboardContext";
 import RedirectTable from "../../../components/dashboard/RedirectTable";
-import { getSites, deleteSite, removeStoredSite, getScanErrors, getAllPages, generateRedirects, getRedirectSuggestions, selectRedirectOption, rejectSuggestion } from "../../../lib/api";
+import { getSites, deleteSite, removeStoredSite, getScanErrors, getAllPages, generateRedirects, getRedirectSuggestions, selectRedirectOption, rejectSuggestion, approveRedirect } from "../../../lib/api";
 import type { RedirectSuggestion } from "../../../lib/api";
 import ScannerCard from "../../../components/dashboard/ScannerCard";
+import PluginSetupModal from "../../../components/dashboard/PluginSetupModal";
 
 interface SiteInfo {
     id: string;
     url: string;        // Original full URL for API calls
     displayUrl: string; // Clean URL for UI display
     status: "connected" | "pending" | "disconnected";
+    apiKey: string;
 }
 
 interface CrawledPage {
@@ -42,6 +44,10 @@ export default function SiteDashboardPage() {
     const [isDeleting, setIsDeleting] = useState(false);
     const [deleteError, setDeleteError] = useState<string | null>(null);
 
+    // Plugin connection state
+    const [pluginConnected, setPluginConnected] = useState(false);
+    const [showPluginModal, setShowPluginModal] = useState(false);
+
     // AI Redirect Suggestions state
     const [aiAnalysisState, setAiAnalysisState] = useState<AiAnalysisState>("idle");
     const [aiSuggestions, setAiSuggestions] = useState<RedirectSuggestion[]>([]);
@@ -49,6 +55,43 @@ export default function SiteDashboardPage() {
     const [errorCount, setErrorCount] = useState(0);
     const aiPollRef = useRef<NodeJS.Timeout | null>(null);
     const [isCheckingData, setIsCheckingData] = useState(true); // Loading state for initial data check
+
+    // Check connection status
+    const handleCheckConnection = async () => {
+        if (!user?.id || !siteId) return false;
+        try {
+            const response = await getSites(user.id);
+            const site = response.sites.find(s => s.id === siteId);
+            if (site) {
+                const isConnected = site.status === "connected";
+                setSiteInfo({
+                    id: site.id,
+                    url: site.url,
+                    displayUrl: site.url.replace(/^https?:\/\//, "").replace(/\/$/, ""),
+                    status: site.status as "connected" | "pending" | "disconnected",
+                    apiKey: site.apiKey || "",
+                });
+                setPluginConnected(isConnected);
+                if (isConnected) {
+                    refreshData(); // Refresh global context
+                }
+                return isConnected;
+            }
+            return false;
+        } catch (error) {
+            console.error("Failed to check connection:", error);
+            return false;
+        }
+    };
+
+    // Sync pluginConnected with siteInfo
+    useEffect(() => {
+        if (siteInfo?.status === "connected") {
+            setPluginConnected(true);
+        } else {
+            setPluginConnected(false);
+        }
+    }, [siteInfo?.status]);
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
@@ -67,15 +110,22 @@ export default function SiteDashboardPage() {
         const fetchSiteInfo = async () => {
             if (user?.id && siteId) {
                 try {
+                    console.log(`[Dashboard] Fetching info for site: ${siteId}`);
                     const response = await getSites(user.id);
+                    console.log(`[Dashboard] Found ${response.sites.length} sites. Searching for ${siteId}...`);
                     const site = response.sites.find(s => s.id === siteId);
+
                     if (site) {
+                        console.log(`[Dashboard] Site found: ${site.url}, apiKey: ${site.apiKey ? 'PRESENT' : 'MISSING'}`);
                         setSiteInfo({
                             id: site.id,
                             url: site.url, // Original full URL
                             displayUrl: site.url.replace(/^https?:\/\//, "").replace(/\/$/, ""),
-                            status: site.status || "pending"
+                            status: site.status as "connected" | "pending" | "disconnected",
+                            apiKey: site.apiKey || "",
                         });
+                    } else {
+                        console.warn(`[Dashboard] Site ${siteId} not found in user's site list.`);
                     }
                 } catch (error) {
                     console.error("Failed to fetch site info:", error);
@@ -126,6 +176,7 @@ export default function SiteDashboardPage() {
                     if (suggestionsRes.success && suggestionsRes.suggestions.length > 0) {
                         setAiSuggestions(suggestionsRes.suggestions);
                         setAiAnalysisState("completed");
+                        setIsRedirectsExpanded(true); // Auto-open drawer when AI completes
                         if (aiPollRef.current) clearInterval(aiPollRef.current);
                     } else if (pollCount >= maxPolls) {
                         setAiAnalysisState("error");
@@ -287,6 +338,7 @@ export default function SiteDashboardPage() {
 
     const handleApprove = async (id: string, option: "primary" | "alternative") => {
         if (!token) return;
+        if (!pluginConnected) { setShowPluginModal(true); return; }
         setRedirectActionLoading(true);
         try {
             await selectRedirectOption(token, id, option);
@@ -300,6 +352,7 @@ export default function SiteDashboardPage() {
 
     const handleReject = async (id: string) => {
         if (!token) return;
+        if (!pluginConnected) { setShowPluginModal(true); return; }
         setRedirectActionLoading(true);
         try {
             await rejectSuggestion(token, id);
@@ -316,9 +369,24 @@ export default function SiteDashboardPage() {
         setRedirectActionLoading(true);
         try {
             await selectRedirectOption(token, id, "custom", customUrl);
-            setAiSuggestions(prev => prev.map(s => s.id === id ? { ...s, status: "approved", selected_option: "custom", custom_redirect_url: customUrl } : s));
+            // Custom selections stay pending until explicitly approved
+            setAiSuggestions(prev => prev.map(s => s.id === id ? { ...s, status: "pending", selected_option: "custom", custom_redirect_url: customUrl } : s));
         } catch (error) {
             console.error("Failed to set custom redirect:", error);
+        } finally {
+            setRedirectActionLoading(false);
+        }
+    };
+
+    const handleApproveCustom = async (id: string) => {
+        if (!token) return;
+        if (!pluginConnected) { setShowPluginModal(true); return; }
+        setRedirectActionLoading(true);
+        try {
+            await approveRedirect(token, id);
+            setAiSuggestions(prev => prev.map(s => s.id === id ? { ...s, status: "approved" } : s));
+        } catch (error) {
+            console.error("Failed to approve custom redirect:", error);
         } finally {
             setRedirectActionLoading(false);
         }
@@ -411,9 +479,16 @@ export default function SiteDashboardPage() {
                                             }`}></span>
                                         {scanState === "scanning" ? "Scanning..." : scanState === "completed" ? "Scan Complete" : "Ready to Scan"}
                                     </span>
-                                    <span className="text-sm text-gray-500">
-                                        AI-powered 404 detection and redirect suggestions
-                                    </span>
+                                    {pluginConnected ? (
+                                        <span className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 border border-green-200">
+                                            <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                                            Plugin Online
+                                        </span>
+                                    ) : (
+                                        <span className="text-sm text-gray-500">
+                                            AI-powered 404 detection and redirect suggestions
+                                        </span>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -670,6 +745,7 @@ export default function SiteDashboardPage() {
                                             onApprove={handleApprove}
                                             onReject={handleReject}
                                             onEditCustom={handleEditCustom}
+                                            onApproveCustom={handleApproveCustom}
                                             isLoading={redirectActionLoading}
                                         />
                                     )}
@@ -994,6 +1070,16 @@ export default function SiteDashboardPage() {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Plugin Setup Modal */}
+            {showPluginModal && siteInfo && (
+                <PluginSetupModal
+                    siteUrl={siteInfo.url}
+                    apiKey={siteInfo.apiKey || "API key not found"}
+                    onCheckConnection={handleCheckConnection}
+                    onClose={() => setShowPluginModal(false)}
+                />
             )}
         </div>
     );

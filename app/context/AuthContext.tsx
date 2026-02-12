@@ -13,6 +13,7 @@ interface AuthContextType {
     user: User | null;
     token: string | null;
     isLoading: boolean;
+    isInitializing: boolean;
     login: (token: string, user: User) => void;
     logout: () => void;
     isAuthenticated: boolean;
@@ -21,24 +22,33 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-    // Initialize state directly from localStorage to prevent race condition
-    // that causes auto-logout when navigating between pages
-    const [user, setUser] = useState<User | null>(() => {
-        if (typeof window === "undefined") return null;
-        try {
-            const stored = localStorage.getItem("auth_user");
-            return stored && stored !== "undefined" ? JSON.parse(stored) : null;
-        } catch {
-            localStorage.removeItem("auth_user");
-            return null;
-        }
-    });
-    const [token, setToken] = useState<string | null>(() => {
-        if (typeof window === "undefined") return null;
-        return localStorage.getItem("auth_token");
-    });
+    const [user, setUser] = useState<User | null>(null);
+    const [token, setToken] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [isInitializing, setIsInitializing] = useState(true);
     const router = useRouter();
+
+    // Effect to initialize auth state from localStorage on the client side
+    // This prevents hydration mismatch because initial state is null for both SSR and CSR
+    useEffect(() => {
+        try {
+            const storedToken = localStorage.getItem("auth_token");
+            const storedUser = localStorage.getItem("auth_user");
+
+            if (storedToken && storedUser && storedUser !== "undefined") {
+                setToken(storedToken);
+                try {
+                    setUser(JSON.parse(storedUser));
+                } catch {
+                    localStorage.removeItem("auth_user");
+                }
+            }
+        } catch (error) {
+            console.error("Auth initialization error:", error);
+        } finally {
+            setIsInitializing(false);
+        }
+    }, []);
 
     const login = (newToken: string, newUser: User) => {
         setToken(newToken);
@@ -62,6 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 user,
                 token,
                 isLoading,
+                isInitializing,
                 login,
                 logout,
                 isAuthenticated: !!token,

@@ -53,6 +53,8 @@ export async function getSites(userId: string): Promise<GetSitesResponse> {
             }>;
         }>(`/sites/list/${userId}`);
 
+        console.log(`[API] Raw sites response for user ${userId}:`, data.sites?.map(s => ({ id: s.site_id, hasKey: !!s.api_key, fields: Object.keys(s) })));
+
         const sites: Site[] = (data.sites || []).map((site) => ({
             id: site.site_id,
             url: site.site_url,

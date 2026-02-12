@@ -11,6 +11,7 @@ interface RedirectTableProps {
     onApprove: (id: string, option: "primary" | "alternative") => void;
     onReject: (id: string) => void;
     onEditCustom: (id: string, customUrl: string) => void;
+    onApproveCustom: (id: string) => void;
     isLoading?: boolean;
 }
 
@@ -26,11 +27,11 @@ function isInternalUrl(brokenUrl: string, siteUrl?: string): boolean {
     }
 }
 
-export default function RedirectTable({ suggestions, siteUrl, onApprove, onReject, onEditCustom, isLoading }: RedirectTableProps) {
+export default function RedirectTable({ suggestions, siteUrl, onApprove, onReject, onEditCustom, onApproveCustom, isLoading }: RedirectTableProps) {
     const [expandedRow, setExpandedRow] = useState<string | null>(null);
     const [editingRow, setEditingRow] = useState<string | null>(null);
     const [editValue, setEditValue] = useState("");
-    const [selectedOptions, setSelectedOptions] = useState<Record<string, "primary" | "alternative">>({});
+    const [selectedOptions, setSelectedOptions] = useState<Record<string, "primary" | "alternative" | "custom">>({});
     const [activeFilter, setActiveFilter] = useState<FilterType>("all");
 
     // Counts for filter badges
@@ -56,21 +57,25 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
         setExpandedRow(prev => prev === id ? null : id);
     };
 
-    const getActiveOption = (s: RedirectSuggestion): "primary" | "alternative" =>
-        selectedOptions[s.id] || "primary";
+    const getActiveOption = (s: RedirectSuggestion): "primary" | "alternative" | "custom" =>
+        selectedOptions[s.id] || (s.selected_option === "custom" ? "custom" : "primary");
 
     const getActiveUrl = (s: RedirectSuggestion) => {
         const opt = getActiveOption(s);
-        return opt === "alternative" && s.alternative_url ? s.alternative_url : s.primary_url;
+        if (opt === "custom" && s.custom_redirect_url) return s.custom_redirect_url;
+        if (opt === "alternative" && s.alternative_url) return s.alternative_url;
+        return s.primary_url;
     };
 
     const getActiveConfidence = (s: RedirectSuggestion) => {
         const opt = getActiveOption(s);
+        if (opt === "custom") return s.primary_confidence; // custom has no separate confidence
         return opt === "alternative" && s.alternative_confidence != null ? s.alternative_confidence : s.primary_confidence;
     };
 
     const getActiveReason = (s: RedirectSuggestion) => {
         const opt = getActiveOption(s);
+        if (opt === "custom") return null; // custom has no AI reason
         return opt === "alternative" && s.alternative_reason ? s.alternative_reason : s.primary_reason;
     };
 
@@ -80,7 +85,15 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
     };
 
     const saveEdit = (id: string) => {
-        if (editValue.trim()) onEditCustom(id, editValue.trim());
+        const trimmed = editValue.trim();
+        const suggestion = suggestions.find(s => s.id === id);
+        const currentUrl = suggestion ? getActiveUrl(suggestion) : "";
+        // Only create custom if URL actually changed
+        if (trimmed && trimmed !== currentUrl) {
+            onEditCustom(id, trimmed);
+            // Close reasoning drawer — custom entries have no AI reasoning
+            if (expandedRow === id) setExpandedRow(null);
+        }
         setEditingRow(null);
         setEditValue("");
     };
@@ -167,9 +180,9 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
                     <colgroup>
                         <col className="w-[30%]" />
                         <col className="w-[28%]" />
-                        <col className="w-[12%]" />
+                        <col className="w-[10%]" />
                         <col className="w-[14%]" />
-                        <col className="w-[16%]" />
+                        <col className="w-[18%]" />
                     </colgroup>
                     <thead>
                         <tr className="bg-gray-50 border-b border-gray-200">
@@ -226,11 +239,11 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
                                                         placeholder="Custom URL"
                                                         autoFocus
                                                     />
-                                                    <button onClick={() => saveEdit(s.id)} className="p-1.5 text-green-600 hover:bg-green-50 rounded-md flex-shrink-0">
-                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                                    <button onClick={() => saveEdit(s.id)} className="p-1.5 text-green-600 bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg flex-shrink-0 transition-colors">
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                                                     </button>
-                                                    <button onClick={cancelEdit} className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-md flex-shrink-0">
-                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                                    <button onClick={cancelEdit} className="p-1.5 text-red-500 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg flex-shrink-0 transition-colors">
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                                                     </button>
                                                 </div>
                                             ) : (
@@ -238,7 +251,7 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
                                                     <p className="text-sm font-medium text-emerald-600 truncate" title={getActiveUrl(s)}>
                                                         {truncateUrl(getActiveUrl(s))}
                                                     </p>
-                                                    {s.alternative_url && s.status === "pending" && (
+                                                    {s.status === "pending" ? (
                                                         <div className="flex items-center gap-1.5 mt-2">
                                                             <button
                                                                 onClick={() => setSelectedOptions(prev => ({ ...prev, [s.id]: "primary" }))}
@@ -249,18 +262,35 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
                                                             >
                                                                 Primary
                                                             </button>
-                                                            <button
-                                                                onClick={() => setSelectedOptions(prev => ({ ...prev, [s.id]: "alternative" }))}
-                                                                className={`px-2 py-0.5 text-[11px] rounded font-medium transition-colors ${getActiveOption(s) === "alternative"
-                                                                    ? "bg-purple-100 text-purple-700"
-                                                                    : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-                                                                    }`}
-                                                            >
-                                                                Alt
-                                                            </button>
+                                                            {s.alternative_url && (
+                                                                <button
+                                                                    onClick={() => setSelectedOptions(prev => ({ ...prev, [s.id]: "alternative" }))}
+                                                                    className={`px-2 py-0.5 text-[11px] rounded font-medium transition-colors ${getActiveOption(s) === "alternative"
+                                                                        ? "bg-blue-100 text-blue-700"
+                                                                        : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                                                                        }`}
+                                                                >
+                                                                    Alt
+                                                                </button>
+                                                            )}
+                                                            {s.selected_option === "custom" && s.custom_redirect_url && (
+                                                                <button
+                                                                    onClick={() => setSelectedOptions(prev => ({ ...prev, [s.id]: "custom" }))}
+                                                                    className={`px-2 py-0.5 text-[11px] rounded font-medium transition-colors ${getActiveOption(s) === "custom"
+                                                                        ? "bg-blue-100 text-blue-700"
+                                                                        : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                                                                        }`}
+                                                                >
+                                                                    Custom
+                                                                </button>
+                                                            )}
                                                         </div>
+                                                    ) : (
+                                                        /* Approved/rejected: show only the selected tag */
+                                                        <span className="inline-block mt-1.5 px-2 py-0.5 text-[11px] rounded font-medium bg-blue-100 text-blue-700">
+                                                            {s.selected_option === "custom" ? "Custom" : s.selected_option === "alternative" ? "Alt" : "Primary"}
+                                                        </span>
                                                     )}
-                                                    <p className="text-[11px] text-gray-400 mt-1">{s.primary_redirect_type} redirect</p>
                                                 </div>
                                             )}
                                         </td>
@@ -274,30 +304,39 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
                                             <p className={`text-[11px] mt-1 ${cd.text} opacity-75`}>{cd.label}</p>
                                         </td>
 
-                                        {/* AI Reasoning toggle */}
-                                        <td className="px-5 py-4 align-top">
-                                            <button
-                                                onClick={() => toggleExpand(s.id)}
-                                                className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-blue-600 transition-colors"
-                                            >
-                                                <svg
-                                                    className={`w-3.5 h-3.5 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
-                                                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                        {/* AI Reasoning toggle — hidden for custom entries */}
+                                        <td className="px-5 py-4 align-middle">
+                                            {getActiveOption(s) !== "custom" ? (
+                                                <button
+                                                    onClick={() => toggleExpand(s.id)}
+                                                    className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-blue-600 transition-colors"
                                                 >
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                                </svg>
-                                                {isExpanded ? "Hide" : "Show Reasoning"}
-                                            </button>
+                                                    <svg
+                                                        className={`w-3.5 h-3.5 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
+                                                        fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                                    >
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                                    </svg>
+                                                    {isExpanded ? "Hide" : "Show Reasoning"}
+                                                </button>
+                                            ) : (
+                                                <span className="text-xs text-gray-400">—</span>
+                                            )}
                                         </td>
 
                                         {/* Actions */}
-                                        <td className="px-5 py-4 align-top">
+                                        <td className="px-5 py-4 align-middle">
                                             {s.status === "pending" ? (
-                                                <div className="flex items-center gap-1">
+                                                <div className="grid grid-cols-2 gap-1.5 w-fit">
+                                                    {/* Row 1: Approve + Reject */}
                                                     <button
-                                                        onClick={() => onApprove(s.id, getActiveOption(s))}
-                                                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-lg transition-colors"
-                                                        title="Approve"
+                                                        onClick={() =>
+                                                            getActiveOption(s) === "custom"
+                                                                ? onApproveCustom(s.id)
+                                                                : onApprove(s.id, getActiveOption(s) as "primary" | "alternative")
+                                                        }
+                                                        className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg transition-colors"
+                                                        title="Approve redirect"
                                                     >
                                                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -306,54 +345,85 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
                                                     </button>
                                                     <button
                                                         onClick={() => onReject(s.id)}
-                                                        className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                                        title="Reject"
+                                                        className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors"
+                                                        title="Reject suggestion"
                                                     >
-                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                                                         </svg>
+                                                        Reject
                                                     </button>
+
+                                                    {/* Row 2: Edit (icon-only) + Unlink (external) */}
                                                     <button
                                                         onClick={() => startEdit(s.id, getActiveUrl(s))}
-                                                        className="p-1.5 text-gray-400 hover:bg-gray-100 hover:text-blue-600 rounded-lg transition-colors"
+                                                        className="inline-flex items-center justify-center p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 border border-gray-200 hover:border-blue-200 rounded-lg transition-colors"
                                                         title="Custom URL"
                                                     >
-                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                                         </svg>
                                                     </button>
+                                                    {!isInternal ? (
+                                                        <button
+                                                            disabled
+                                                            className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded-lg cursor-not-allowed opacity-60 transition-colors"
+                                                            title="Unlink — coming soon"
+                                                        >
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.172 13.828a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                                                <line x1="4" y1="4" x2="20" y2="20" strokeWidth={2} strokeLinecap="round" />
+                                                            </svg>
+                                                            Unlink
+                                                        </button>
+                                                    ) : (
+                                                        /* Spacer for internal rows to keep grid aligned */
+                                                        <span />
+                                                    )}
                                                 </div>
                                             ) : (
-                                                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${s.status === "approved" ? "bg-green-100 text-green-700"
-                                                    : s.status === "rejected" ? "bg-red-100 text-red-700"
-                                                        : "bg-blue-100 text-blue-700"
-                                                    }`}>
-                                                    {s.status === "approved" && (
-                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                                    )}
-                                                    {s.status === "rejected" && (
-                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                                                    )}
-                                                    <span className="capitalize">{s.status}</span>
-                                                    {s.selected_option && s.status === "approved" && (
-                                                        <span className="opacity-60">({s.selected_option})</span>
-                                                    )}
-                                                </span>
+                                                <div className="flex items-center justify-center gap-2 h-full">
+                                                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${s.status === "approved" ? "bg-green-100 text-green-700"
+                                                        : s.status === "rejected" ? "bg-red-100 text-red-700"
+                                                            : "bg-blue-100 text-blue-700"
+                                                        }`}>
+                                                        {s.status === "approved" && (
+                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                                        )}
+                                                        {s.status === "rejected" && (
+                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                                        )}
+                                                        <span className="capitalize">{s.status}</span>
+                                                    </span>
+                                                    <button
+                                                        disabled
+                                                        className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-gray-400 bg-gray-50 border border-gray-200 rounded-lg cursor-not-allowed"
+                                                        title="Undo — coming soon"
+                                                    >
+                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a5 5 0 015 5v2M3 10l4-4m-4 4l4 4" />
+                                                        </svg>
+                                                        Undo
+                                                    </button>
+                                                </div>
                                             )}
                                         </td>
                                     </tr>
 
-                                    {/* Expanded AI Reasoning — full-width row directly below */}
-                                    {isExpanded && (
-                                        <tr className="bg-gradient-to-r from-blue-50/80 via-indigo-50/40 to-blue-50/80 animate-in fade-in slide-in-from-top-2 duration-200">
-                                            <td colSpan={5} className="px-5 py-3">
-                                                <p className="text-sm text-gray-700 leading-relaxed">
-                                                    <span className="font-semibold text-blue-700">AI Reasoning:</span>{" "}
-                                                    {getActiveReason(s)}
-                                                </p>
-                                            </td>
-                                        </tr>
-                                    )}
+                                    {/* Expanded AI Reasoning — hidden for custom entries */}
+                                    {
+                                        isExpanded && getActiveOption(s) !== "custom" && (
+                                            <tr className="bg-gradient-to-r from-blue-50/80 via-indigo-50/40 to-blue-50/80 animate-in fade-in slide-in-from-top-2 duration-200">
+                                                <td colSpan={5} className="px-5 py-3">
+                                                    <p className="text-sm text-gray-700 leading-relaxed">
+                                                        <span className="font-semibold text-blue-700">AI Reasoning:</span>{" "}
+                                                        {getActiveReason(s)}
+                                                    </p>
+                                                </td>
+                                            </tr>
+                                        )
+                                    }
                                 </Fragment>
                             );
                         })}
@@ -362,27 +432,29 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
             </div>
 
             {/* ─── Empty State ─── */}
-            {filtered.length === 0 && (
-                <div className="flex flex-col items-center justify-center py-16 px-6">
-                    <div className="w-14 h-14 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                        <svg className="w-7 h-7 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
+            {
+                filtered.length === 0 && (
+                    <div className="flex flex-col items-center justify-center py-16 px-6">
+                        <div className="w-14 h-14 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                            <svg className="w-7 h-7 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </div>
+                        <h4 className="text-base font-semibold text-gray-900">
+                            {suggestions.length === 0
+                                ? "No redirect suggestions yet"
+                                : `No ${activeFilter} broken links found`
+                            }
+                        </h4>
+                        <p className="text-sm text-gray-500 mt-1 text-center max-w-sm">
+                            {suggestions.length === 0
+                                ? "Run a scan to find 404 errors, then AI will generate redirect suggestions."
+                                : `Try switching to a different filter to see more results.`
+                            }
+                        </p>
                     </div>
-                    <h4 className="text-base font-semibold text-gray-900">
-                        {suggestions.length === 0
-                            ? "No redirect suggestions yet"
-                            : `No ${activeFilter} broken links found`
-                        }
-                    </h4>
-                    <p className="text-sm text-gray-500 mt-1 text-center max-w-sm">
-                        {suggestions.length === 0
-                            ? "Run a scan to find 404 errors, then AI will generate redirect suggestions."
-                            : `Try switching to a different filter to see more results.`
-                        }
-                    </p>
-                </div>
-            )}
-        </div>
+                )
+            }
+        </div >
     );
 }

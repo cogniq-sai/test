@@ -13,12 +13,18 @@ import SearchFilter from "../components/dashboard/SearchFilter";
 import ActivityFeed, { Activity } from "../components/dashboard/ActivityFeed";
 
 export default function DashboardPage() {
-    const { user, token, isAuthenticated, isLoading, logout } = useAuth();
+    const { user, token, isAuthenticated, isLoading, isInitializing, logout } = useAuth();
     const { sites, stats, activities, isLoading: isDashboardLoading, refreshData } = useDashboard();
     const router = useRouter();
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [hasMounted, setHasMounted] = useState(false);
+
+    // Initial mount check to prevent hydration mismatch
+    useEffect(() => {
+        setHasMounted(true);
+    }, []);
 
     // Search, Filter, and Sort state
     const [searchQuery, setSearchQuery] = useState('');
@@ -28,6 +34,16 @@ export default function DashboardPage() {
     // Pagination state
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 10;
+
+    // Greeting — computed client-side only to avoid hydration mismatch
+    const [greeting, setGreeting] = useState("Welcome back! 👋");
+    useEffect(() => {
+        if (!user?.name) return;
+        const hour = new Date().getHours();
+        const timeGreeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+        const firstName = user.name.split(' ')[0];
+        setGreeting(`${timeGreeting}, ${firstName}! 👋`);
+    }, [user?.name]);
 
     // Manual refresh handler
     const handleManualRefresh = async () => {
@@ -40,10 +56,10 @@ export default function DashboardPage() {
     };
 
     useEffect(() => {
-        if (!isLoading && !isAuthenticated) {
+        if (!isInitializing && !isLoading && !isAuthenticated) {
             router.push("/login");
         }
-    }, [isLoading, isAuthenticated, router]);
+    }, [isInitializing, isLoading, isAuthenticated, router]);
 
     // Refresh dashboard data when page comes into focus from navigation
     useEffect(() => {
@@ -130,10 +146,13 @@ export default function DashboardPage() {
         return filteredAndSortedSites.slice(startIndex, endIndex);
     }, [filteredAndSortedSites, currentPage, itemsPerPage]);
 
-    if (isLoading) {
+    if (!hasMounted || isInitializing || isLoading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-cyan-50">
-                <div className="text-gray-600">Loading...</div>
+                <div className="flex flex-col items-center gap-4">
+                    <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                    <div className="text-gray-600 font-medium">Preparing your dashboard...</div>
+                </div>
             </div>
         );
     }
@@ -176,12 +195,7 @@ export default function DashboardPage() {
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
                     <div>
                         <h1 className="text-2xl font-bold text-gray-900">
-                            {(() => {
-                                const hour = new Date().getHours();
-                                const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-                                const firstName = user?.name ? user.name.split(' ')[0] : 'back';
-                                return `${greeting}, ${firstName}! 👋`;
-                            })()}
+                            {greeting}
                         </h1>
                         <p className="text-gray-600 mt-1">Here's an overview of your SEO performance</p>
                     </div>

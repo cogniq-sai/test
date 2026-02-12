@@ -146,3 +146,17 @@ export async function rejectSuggestion(
         { method: "DELETE" }
     );
 }
+
+/**
+ * Explicitly approve a redirect suggestion (used for custom URLs that don't auto-approve)
+ */
+export async function approveRedirect(
+    token: string,
+    suggestionId: string
+): Promise<SelectRedirectResponse> {
+    return authRequest<SelectRedirectResponse>(
+        `/redirects/${suggestionId}/approve`,
+        token,
+        { method: "PUT" }
+    );
+}
