@@ -10,5 +10,5 @@ export { getAllPages } from "./pages";
 export type { PageData, GetAllPagesResponse } from "./pages";
 export { startScan, getScanStatus, getScanErrors, cancelScan, getAllActiveScans, pauseScan, resumeScan } from "./scan";
 export type { StartScanRequest, StartScanResponse, ScanStatusResponse, ScanError, GetScanErrorsResponse, ActiveScan, GetActiveScansResponse, PauseScanResponse, ResumeScanResponse } from "./scan";
-export { generateRedirects, getRedirectSuggestions, selectRedirectOption, applyRedirects, rejectSuggestion, approveRedirect } from "./redirects";
+export { generateRedirects, getRedirectSuggestions, selectRedirectOption, applyRedirects, rejectSuggestion, approveRedirect, undoRedirect } from "./redirects";
 export type { RedirectSuggestion, GenerateRedirectsResponse, GetSuggestionsResponse, SelectRedirectResponse, ApplyRedirectsResponse } from "./redirects";

@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useAuth } from "../../../context/AuthContext";
 import { useDashboard } from "../../../context/DashboardContext";
 import RedirectTable from "../../../components/dashboard/RedirectTable";
-import { getSites, deleteSite, removeStoredSite, getScanErrors, getAllPages, generateRedirects, getRedirectSuggestions, selectRedirectOption, rejectSuggestion, approveRedirect } from "../../../lib/api";
+import { getSites, deleteSite, removeStoredSite, getScanErrors, getAllPages, generateRedirects, getRedirectSuggestions, selectRedirectOption, rejectSuggestion, approveRedirect, undoRedirect } from "../../../lib/api";
 import type { RedirectSuggestion } from "../../../lib/api";
 import ScannerCard from "../../../components/dashboard/ScannerCard";
 import PluginSetupModal from "../../../components/dashboard/PluginSetupModal";
@@ -32,7 +32,7 @@ type AiAnalysisState = "idle" | "analyzing" | "completed" | "error";
 export default function SiteDashboardPage() {
     const router = useRouter();
     const params = useParams();
-    const { user, token, isAuthenticated, isLoading } = useAuth();
+    const { user, token, isAuthenticated, isLoading, isInitializing } = useAuth();
     const { refreshData } = useDashboard();
     const [siteInfo, setSiteInfo] = useState<SiteInfo | null>(null);
     const [scanState, setScanState] = useState<ScanState>("idle");
@@ -100,10 +100,10 @@ export default function SiteDashboardPage() {
     const siteId = params.id as string;
 
     useEffect(() => {
-        if (!isLoading && !isAuthenticated) {
+        if (!isInitializing && !isLoading && !isAuthenticated) {
             router.push("/login");
         }
-    }, [isLoading, isAuthenticated, router]);
+    }, [isInitializing, isLoading, isAuthenticated, router]);
 
     // Fetch site info from API
     useEffect(() => {
@@ -392,6 +392,21 @@ export default function SiteDashboardPage() {
         }
     };
 
+    const handleUndo = async (id: string) => {
+        if (!token) return;
+        if (!pluginConnected) { setShowPluginModal(true); return; }
+        setRedirectActionLoading(true);
+        try {
+            await undoRedirect(token, id);
+            // Reset back to pending so user sees original AI suggestions
+            setAiSuggestions(prev => prev.map(s => s.id === id ? { ...s, status: "pending" as const, selected_option: null } : s));
+        } catch (error) {
+            console.error("Failed to undo redirect:", error);
+        } finally {
+            setRedirectActionLoading(false);
+        }
+    };
+
     // Calculate stats
     const stats = {
         totalPages: pages.length,
@@ -402,7 +417,7 @@ export default function SiteDashboardPage() {
         rejected: aiSuggestions.filter(s => s.status === "rejected").length
     };
 
-    if (isLoading || isCheckingData) {
+    if (isInitializing || isLoading || isCheckingData) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-cyan-50">
                 <div className="flex flex-col items-center gap-4">
@@ -483,6 +498,20 @@ export default function SiteDashboardPage() {
                                         <span className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700 border border-green-200">
                                             <span className="w-2 h-2 rounded-full bg-green-500"></span>
                                             Plugin Online
+                                        </span>
+                                    ) : (scanState === "completed" && aiSuggestions.length > 0 && siteInfo?.apiKey) ? (
+                                        <span
+                                            className="inline-flex items-center gap-2 px-3 py-1 text-xs font-semibold rounded-full bg-amber-50 text-amber-700 border border-amber-200 cursor-pointer hover:bg-amber-100 transition-colors"
+                                            onClick={() => {
+                                                navigator.clipboard.writeText(siteInfo.apiKey);
+                                            }}
+                                            title="Click to copy API key"
+                                        >
+                                            <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                                            Plugin Offline
+                                            <span className="text-amber-500">•</span>
+                                            <span className="font-mono text-amber-600">{siteInfo.apiKey.slice(0, 8)}…</span>
+                                            <svg className="w-3 h-3 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2" /></svg>
                                         </span>
                                     ) : (
                                         <span className="text-sm text-gray-500">
@@ -746,6 +775,7 @@ export default function SiteDashboardPage() {
                                             onReject={handleReject}
                                             onEditCustom={handleEditCustom}
                                             onApproveCustom={handleApproveCustom}
+                                            onUndo={handleUndo}
                                             isLoading={redirectActionLoading}
                                         />
                                     )}

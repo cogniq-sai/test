@@ -210,8 +210,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         setActivities(prev => [activity, ...prev].slice(0, 5));
     };
 
-    // Initial load and cache handling
+    // Initial load, cache handling, and polling
     useEffect(() => {
+        let intervalId: NodeJS.Timeout;
+
         if (isAuthenticated && user?.id) {
             // Cache validity check - reduce cache to 1 minute for fresher data
             const CACHE_DURATION = 1 * 60 * 1000; // 1 minute
@@ -223,7 +225,16 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
             } else {
                 setIsLoading(false);
             }
+
+            // Poll every 30 seconds to keep data fresh (especially for plugin status)
+            intervalId = setInterval(() => {
+                refreshData();
+            }, 30000);
         }
+
+        return () => {
+            if (intervalId) clearInterval(intervalId);
+        };
     }, [isAuthenticated, user?.id]);
 
     return (

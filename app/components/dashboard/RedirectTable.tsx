@@ -12,6 +12,7 @@ interface RedirectTableProps {
     onReject: (id: string) => void;
     onEditCustom: (id: string, customUrl: string) => void;
     onApproveCustom: (id: string) => void;
+    onUndo?: (id: string) => void;
     isLoading?: boolean;
 }
 
@@ -27,7 +28,7 @@ function isInternalUrl(brokenUrl: string, siteUrl?: string): boolean {
     }
 }
 
-export default function RedirectTable({ suggestions, siteUrl, onApprove, onReject, onEditCustom, onApproveCustom, isLoading }: RedirectTableProps) {
+export default function RedirectTable({ suggestions, siteUrl, onApprove, onReject, onEditCustom, onApproveCustom, onUndo, isLoading }: RedirectTableProps) {
     const [expandedRow, setExpandedRow] = useState<string | null>(null);
     const [editingRow, setEditingRow] = useState<string | null>(null);
     const [editValue, setEditValue] = useState("");
@@ -384,28 +385,41 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
                                                 </div>
                                             ) : (
                                                 <div className="flex items-center justify-center gap-2 h-full">
-                                                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${s.status === "approved" ? "bg-green-100 text-green-700"
-                                                        : s.status === "rejected" ? "bg-red-100 text-red-700"
-                                                            : "bg-blue-100 text-blue-700"
+                                                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${s.status === "applied" ? "bg-emerald-100 text-emerald-700"
+                                                            : s.status === "approved" ? "bg-green-100 text-green-700"
+                                                                : s.status === "rejected" ? "bg-red-100 text-red-700"
+                                                                    : s.status === "undone" ? "bg-gray-100 text-gray-600"
+                                                                        : s.status === "reverted" ? "bg-yellow-100 text-yellow-700"
+                                                                            : "bg-blue-100 text-blue-700"
                                                         }`}>
-                                                        {s.status === "approved" && (
+                                                        {(s.status === "approved" || s.status === "applied") && (
                                                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                                                         )}
                                                         {s.status === "rejected" && (
                                                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                                                         )}
-                                                        <span className="capitalize">{s.status}</span>
+                                                        {s.status === "reverted" && (
+                                                            <svg className="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                                                        )}
+                                                        {s.status === "undone" && (
+                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a5 5 0 015 5v2M3 10l4-4m-4 4l4 4" /></svg>
+                                                        )}
+                                                        <span className="capitalize">
+                                                            {s.status === "applied" ? "Live" : s.status === "reverted" ? "Reverting..." : s.status}
+                                                        </span>
                                                     </span>
-                                                    <button
-                                                        disabled
-                                                        className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-gray-400 bg-gray-50 border border-gray-200 rounded-lg cursor-not-allowed"
-                                                        title="Undo — coming soon"
-                                                    >
-                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a5 5 0 015 5v2M3 10l4-4m-4 4l4 4" />
-                                                        </svg>
-                                                        Undo
-                                                    </button>
+                                                    {(s.status === "approved" || s.status === "applied") && onUndo && (
+                                                        <button
+                                                            onClick={() => onUndo(s.id)}
+                                                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-gray-600 bg-gray-50 hover:bg-red-50 hover:text-red-600 border border-gray-200 hover:border-red-200 rounded-lg transition-colors"
+                                                            title="Undo this redirect"
+                                                        >
+                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a5 5 0 015 5v2M3 10l4-4m-4 4l4 4" />
+                                                            </svg>
+                                                            Undo
+                                                        </button>
+                                                    )}
                                                 </div>
                                             )}
                                         </td>

@@ -20,7 +20,7 @@ export interface RedirectSuggestion {
     alternative_redirect_type: string | null;
     selected_option: string | null;
     custom_redirect_url: string | null;
-    status: "pending" | "approved" | "rejected" | "applied";
+    status: "pending" | "approved" | "rejected" | "applied" | "reverted" | "undone";
     created_at: string;
     updated_at: string;
     applied_at: string | null;
@@ -156,6 +156,21 @@ export async function approveRedirect(
 ): Promise<SelectRedirectResponse> {
     return authRequest<SelectRedirectResponse>(
         `/redirects/${suggestionId}/approve`,
+        token,
+        { method: "PUT" }
+    );
+}
+
+/**
+ * Undo an applied/approved redirect (sets status to 'reverted')
+ * Plugin will deactivate it on next sync
+ */
+export async function undoRedirect(
+    token: string,
+    suggestionId: string
+): Promise<{ success: boolean; message: string }> {
+    return authRequest<{ success: boolean; message: string }>(
+        `/redirects/${suggestionId}/undo`,
         token,
         { method: "PUT" }
     );
