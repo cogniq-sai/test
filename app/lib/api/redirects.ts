@@ -20,7 +20,7 @@ export interface RedirectSuggestion {
     alternative_redirect_type: string | null;
     selected_option: string | null;
     custom_redirect_url: string | null;
-    status: "pending" | "approved" | "rejected" | "applied" | "reverted" | "undone";
+    status: "pending" | "approved" | "rejected" | "applied" | "reverted" | "undone" | "failed";
     created_at: string;
     updated_at: string;
     applied_at: string | null;

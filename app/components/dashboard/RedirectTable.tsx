@@ -63,9 +63,13 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
 
     const getActiveUrl = (s: RedirectSuggestion) => {
         const opt = getActiveOption(s);
+        // Priority 1: User-selected custom URL (stored in DB)
+        if (s.selected_option === "custom" && s.custom_redirect_url) return s.custom_redirect_url;
+        // Priority 2: Local UI selection
         if (opt === "custom" && s.custom_redirect_url) return s.custom_redirect_url;
         if (opt === "alternative" && s.alternative_url) return s.alternative_url;
-        return s.primary_url;
+        // Priority 3: Default AI suggestion or self-link
+        return s.primary_url || s.broken_url;
     };
 
     const getActiveConfidence = (s: RedirectSuggestion) => {
@@ -88,10 +92,27 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
     const saveEdit = (id: string) => {
         const trimmed = editValue.trim();
         const suggestion = suggestions.find(s => s.id === id);
-        const currentUrl = suggestion ? getActiveUrl(suggestion) : "";
+        if (!suggestion) {
+            setEditingRow(null);
+            setEditValue("");
+            return;
+        }
+
+        const isInternal = isInternalUrl(suggestion.broken_url, siteUrl);
+        const currentUrl = getActiveUrl(suggestion);
+
+        // For external links, if they save a URL that is just the broken_url, it's not a custom redirect
+        if (!isInternal && trimmed === suggestion.broken_url) {
+            setEditingRow(null);
+            setEditValue("");
+            return;
+        }
+
         // Only create custom if URL actually changed
         if (trimmed && trimmed !== currentUrl) {
             onEditCustom(id, trimmed);
+            // Auto-select 'custom' tag so they approve the right thing
+            setSelectedOptions(prev => ({ ...prev, [id]: "custom" }));
             // Close reasoning drawer — custom entries have no AI reasoning
             if (expandedRow === id) setExpandedRow(null);
         }
@@ -188,7 +209,7 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
                     <thead>
                         <tr className="bg-gray-50 border-b border-gray-200">
                             <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Source URL</th>
-                            <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Suggested Target</th>
+                            <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Redirection</th>
                             <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Confidence</th>
                             <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">AI Reasoning</th>
                             <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
@@ -227,7 +248,7 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
                                             </div>
                                         </td>
 
-                                        {/* Suggested Target */}
+                                        {/* Redirection */}
                                         <td className="px-5 py-4 align-top">
                                             {isEditing ? (
                                                 <div className="flex items-center gap-1.5">
@@ -247,7 +268,7 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
                                                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                                                     </button>
                                                 </div>
-                                            ) : (
+                                            ) : isInternal ? (
                                                 <div className="min-w-0">
                                                     <p className="text-sm font-medium text-emerald-600 truncate" title={getActiveUrl(s)}>
                                                         {truncateUrl(getActiveUrl(s))}
@@ -293,21 +314,68 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
                                                         </span>
                                                     )}
                                                 </div>
+                                            ) : (
+                                                /* External URL: show target URL + selectable tags if pending */
+                                                <div className="min-w-0">
+                                                    <p
+                                                        className={`text-sm font-medium text-emerald-600 truncate ${getActiveOption(s) === "primary" && s.status === "pending" ? "cursor-help" : ""}`}
+                                                        title={getActiveOption(s) === "primary" && s.status === "pending" ? "External 404 Url - Either add custom redirection url or unlink it." : undefined}
+                                                    >
+                                                        {truncateUrl(getActiveUrl(s))}
+                                                    </p>
+                                                    {s.status === "pending" ? (
+                                                        <div className="flex items-center gap-1.5 mt-2">
+                                                            <button
+                                                                onClick={() => setSelectedOptions(prev => ({ ...prev, [s.id]: "primary" }))}
+                                                                className={`px-2 py-0.5 text-[11px] rounded font-medium transition-colors ${getActiveOption(s) === "primary"
+                                                                    ? "bg-blue-100 text-blue-700"
+                                                                    : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                                                                    }`}
+                                                            >
+                                                                External Link
+                                                            </button>
+                                                            {(s.custom_redirect_url || selectedOptions[s.id] === "custom") && (
+                                                                <button
+                                                                    onClick={() => setSelectedOptions(prev => ({ ...prev, [s.id]: "custom" }))}
+                                                                    className={`px-2 py-0.5 text-[11px] rounded font-medium transition-colors ${getActiveOption(s) === "custom"
+                                                                        ? "bg-blue-100 text-blue-700"
+                                                                        : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                                                                        }`}
+                                                                >
+                                                                    Custom
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    ) : (
+                                                        /* Approved/rejected: show only the selected tag */
+                                                        <span className="inline-block mt-1.5 px-2 py-0.5 text-[11px] rounded font-medium bg-blue-100 text-blue-700">
+                                                            {s.selected_option === "custom" ? "Custom" : "External Link"}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             )}
                                         </td>
 
                                         {/* Confidence */}
                                         <td className="px-5 py-4 align-top">
-                                            <div className="flex items-center gap-2">
-                                                <span className={`w-2.5 h-2.5 rounded-full ${cd.bg} ring-4 ${cd.ring} flex-shrink-0`} />
-                                                <span className={`text-sm font-semibold ${cd.text}`}>{conf}%</span>
-                                            </div>
-                                            <p className={`text-[11px] mt-1 ${cd.text} opacity-75`}>{cd.label}</p>
+                                            {isInternal ? (
+                                                <>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`w-2.5 h-2.5 rounded-full ${cd.bg} ring-4 ${cd.ring} flex-shrink-0`} />
+                                                        <span className={`text-sm font-semibold ${cd.text}`}>{conf}%</span>
+                                                    </div>
+                                                    <p className={`text-[11px] mt-1 ${cd.text} opacity-75`}>{cd.label}</p>
+                                                </>
+                                            ) : (
+                                                <span className="text-sm text-gray-400">&mdash;</span>
+                                            )}
                                         </td>
 
-                                        {/* AI Reasoning toggle — hidden for custom entries */}
-                                        <td className="px-5 py-4 align-middle">
-                                            {getActiveOption(s) !== "custom" ? (
+                                        {/* AI Reasoning toggle — hidden for custom entries and external URLs */}
+                                        <td className="px-5 py-4 align-top">
+                                            {!isInternal ? (
+                                                <span className="text-sm text-gray-400">&mdash;</span>
+                                            ) : getActiveOption(s) !== "custom" ? (
                                                 <button
                                                     onClick={() => toggleExpand(s.id)}
                                                     className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-blue-600 transition-colors"
@@ -321,23 +389,27 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
                                                     {isExpanded ? "Hide" : "Show Reasoning"}
                                                 </button>
                                             ) : (
-                                                <span className="text-xs text-gray-400">—</span>
+                                                <span className="text-xs text-gray-400">&mdash;</span>
                                             )}
                                         </td>
 
                                         {/* Actions */}
                                         <td className="px-5 py-4 align-middle">
-                                            {s.status === "pending" ? (
-                                                <div className="grid grid-cols-2 gap-1.5 w-fit">
+                                            {s.status === "pending" && isInternal ? (
+                                                /* Internal: Approve / Reject / Edit / Unlink */
+                                                <div className="grid grid-cols-2 gap-1 w-[160px]">
                                                     {/* Row 1: Approve + Reject */}
                                                     <button
+                                                        disabled={!isInternal && getActiveOption(s) === "primary"}
                                                         onClick={() =>
                                                             getActiveOption(s) === "custom"
                                                                 ? onApproveCustom(s.id)
                                                                 : onApprove(s.id, getActiveOption(s) as "primary" | "alternative")
                                                         }
-                                                        className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg transition-colors"
-                                                        title="Approve redirect"
+                                                        className={`inline-flex items-center justify-center gap-1 px-2.5 py-1 h-[30px] text-xs font-medium border rounded-lg transition-colors w-full ${!isInternal && getActiveOption(s) === "primary"
+                                                            ? "bg-gray-50 text-gray-400 border-gray-100 cursor-not-allowed"
+                                                            : "text-green-700 bg-green-50 hover:bg-green-100 border-green-200"}`}
+                                                        title={!isInternal && getActiveOption(s) === "primary" ? "External links require a custom URL to approve" : "Approve redirect"}
                                                     >
                                                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -346,7 +418,7 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
                                                     </button>
                                                     <button
                                                         onClick={() => onReject(s.id)}
-                                                        className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors"
+                                                        className="inline-flex items-center justify-center gap-1 px-2.5 py-1 h-[30px] text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors w-full"
                                                         title="Reject suggestion"
                                                     >
                                                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -355,71 +427,144 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
                                                         Reject
                                                     </button>
 
-                                                    {/* Row 2: Edit (icon-only) + Unlink (external) */}
+                                                    {/* Row 2: Edit (icon-only) */}
                                                     <button
                                                         onClick={() => startEdit(s.id, getActiveUrl(s))}
-                                                        className="inline-flex items-center justify-center p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 border border-gray-200 hover:border-blue-200 rounded-lg transition-colors"
+                                                        className="inline-flex items-center justify-center px-2.5 py-1 h-[30px] text-gray-400 hover:text-blue-600 hover:bg-blue-50 border border-gray-200 hover:border-blue-200 rounded-lg transition-colors w-full"
                                                         title="Custom URL"
                                                     >
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                                         </svg>
                                                     </button>
-                                                    {!isInternal ? (
-                                                        <button
-                                                            disabled
-                                                            className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded-lg cursor-not-allowed opacity-60 transition-colors"
-                                                            title="Unlink — coming soon"
-                                                        >
-                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.172 13.828a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                                                                <line x1="4" y1="4" x2="20" y2="20" strokeWidth={2} strokeLinecap="round" />
-                                                            </svg>
-                                                            Unlink
-                                                        </button>
+                                                    <span />
+                                                </div>
+                                            ) : s.status === "pending" && !isInternal ? (
+                                                /* External: Actions depend on selected tag (External Link vs Custom) */
+                                                <div className="grid grid-cols-2 gap-1 w-[160px]">
+                                                    {getActiveOption(s) === "custom" ? (
+                                                        /* Custom tag active: show Approve / Reject / Edit / Unlink */
+                                                        <>
+                                                            <button
+                                                                disabled={getActiveOption(s) === "primary"}
+                                                                onClick={() => onApproveCustom(s.id)}
+                                                                className={`inline-flex items-center justify-center gap-1 px-2.5 py-1 h-[30px] text-xs font-medium border rounded-lg transition-colors w-full ${getActiveOption(s) === "primary"
+                                                                    ? "bg-gray-50 text-gray-400 border-gray-100 cursor-not-allowed"
+                                                                    : "text-green-700 bg-green-50 hover:bg-green-100 border-green-200"}`}
+                                                                title={getActiveOption(s) === "primary" ? "Provide a custom URL first" : "Approve redirect"}
+                                                            >
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                                </svg>
+                                                                Approve
+                                                            </button>
+                                                            <button
+                                                                onClick={() => onReject(s.id)}
+                                                                className="inline-flex items-center justify-center gap-1 px-2.5 py-1 h-[30px] text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors w-full"
+                                                                title="Reject suggestion"
+                                                            >
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                                </svg>
+                                                                Reject
+                                                            </button>
+                                                            <button
+                                                                onClick={() => startEdit(s.id, getActiveUrl(s))}
+                                                                className="inline-flex items-center justify-center px-2.5 py-1 h-[30px] text-gray-400 hover:text-blue-600 hover:bg-blue-50 border border-gray-200 hover:border-blue-200 rounded-lg transition-colors w-full"
+                                                                title="Edit custom URL"
+                                                            >
+                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                                </svg>
+                                                            </button>
+                                                            <button
+                                                                disabled
+                                                                className="inline-flex items-center justify-center gap-1 px-2.5 py-1 h-[30px] text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded-lg cursor-not-allowed opacity-60 transition-colors w-full"
+                                                                title="Unlink — coming soon"
+                                                            >
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.172 13.828a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                                                    <line x1="4" y1="4" x2="20" y2="20" strokeWidth={2} strokeLinecap="round" />
+                                                                </svg>
+                                                                Unlink
+                                                            </button>
+                                                        </>
                                                     ) : (
-                                                        /* Spacer for internal rows to keep grid aligned */
-                                                        <span />
+                                                        /* External Link tag active: show Edit + Unlink on top row with spacers below to maintain height */
+                                                        <>
+                                                            <button
+                                                                onClick={() => startEdit(s.id, s.broken_url)}
+                                                                className="inline-flex items-center justify-center px-2.5 py-1 h-[30px] text-gray-400 hover:text-blue-600 hover:bg-blue-50 border border-gray-200 hover:border-blue-200 rounded-lg transition-colors w-full"
+                                                                title="Set custom redirect URL"
+                                                            >
+                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                                </svg>
+                                                            </button>
+                                                            <button
+                                                                disabled
+                                                                className="inline-flex items-center justify-center gap-1 px-2.5 py-1 h-[30px] text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded-lg cursor-not-allowed opacity-60 transition-colors w-full"
+                                                                title="Unlink — coming soon"
+                                                            >
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.172 13.828a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                                                    <line x1="4" y1="4" x2="20" y2="20" strokeWidth={2} strokeLinecap="round" />
+                                                                </svg>
+                                                                Unlink
+                                                            </button>
+                                                            <div className="h-[30px]" /> {/* Spacer row 2, col 1 */}
+                                                            <div className="h-[30px]" /> {/* Spacer row 2, col 2 */}
+                                                        </>
                                                     )}
                                                 </div>
                                             ) : (
-                                                <div className="flex items-center justify-center gap-2 h-full">
-                                                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${s.status === "applied" ? "bg-emerald-100 text-emerald-700"
+                                                /* Approved, Applied, Rejected, etc: Show status and Undo */
+                                                <div className="flex flex-col justify-center min-h-[64px] w-[160px]">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${s.status === "applied" ? "bg-emerald-100 text-emerald-700"
                                                             : s.status === "approved" ? "bg-green-100 text-green-700"
                                                                 : s.status === "rejected" ? "bg-red-100 text-red-700"
                                                                     : s.status === "undone" ? "bg-gray-100 text-gray-600"
                                                                         : s.status === "reverted" ? "bg-yellow-100 text-yellow-700"
-                                                                            : "bg-blue-100 text-blue-700"
-                                                        }`}>
-                                                        {(s.status === "approved" || s.status === "applied") && (
-                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                                        )}
-                                                        {s.status === "rejected" && (
-                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                                                        )}
-                                                        {s.status === "reverted" && (
-                                                            <svg className="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                                                        )}
-                                                        {s.status === "undone" && (
-                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a5 5 0 015 5v2M3 10l4-4m-4 4l4 4" /></svg>
-                                                        )}
-                                                        <span className="capitalize">
-                                                            {s.status === "applied" ? "Live" : s.status === "reverted" ? "Reverting..." : s.status}
-                                                        </span>
-                                                    </span>
-                                                    {(s.status === "approved" || s.status === "applied") && onUndo && (
-                                                        <button
-                                                            onClick={() => onUndo(s.id)}
-                                                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-gray-600 bg-gray-50 hover:bg-red-50 hover:text-red-600 border border-gray-200 hover:border-red-200 rounded-lg transition-colors"
-                                                            title="Undo this redirect"
+                                                                            : s.status === "failed" ? "bg-red-100 text-red-700 cursor-help"
+                                                                                : "bg-blue-100 text-blue-700"
+                                                            }`}
+                                                            title={s.status === "failed" ? (s.primary_reason || "Unknown failure") : undefined}
                                                         >
-                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a5 5 0 015 5v2M3 10l4-4m-4 4l4 4" />
-                                                            </svg>
-                                                            Undo
-                                                        </button>
-                                                    )}
+                                                            {s.status === "applied" && (
+                                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                                            )}
+                                                            {(s.status === "approved" || s.status === "reverted") && (
+                                                                <svg className="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                                                            )}
+                                                            {s.status === "undone" && (
+                                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a5 5 0 015 5v2M3 10l4-4m-4 4l4 4" /></svg>
+                                                            )}
+                                                            {s.status === "failed" && (
+                                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                                            )}
+                                                            <span className="capitalize">
+                                                                {s.status === "applied" ? "Live"
+                                                                    : s.status === "approved" ? "Applying..."
+                                                                        : s.status === "reverted" ? "Reverting..."
+                                                                            : s.status}
+                                                            </span>
+                                                        </span>
+                                                        {(s.status === "applied" || s.status === "rejected" || s.status === "failed") && onUndo && (
+                                                            <button
+                                                                onClick={() => onUndo(s.id)}
+                                                                className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-gray-600 bg-gray-50 hover:bg-red-50 hover:text-red-600 border border-gray-200 hover:border-red-200 rounded-lg transition-colors"
+                                                                title="Undo this redirect"
+                                                            >
+                                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a5 5 0 015 5v2M3 10l4-4m-4 4l4 4" />
+                                                                </svg>
+                                                                Undo
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             )}
                                         </td>

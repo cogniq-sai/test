@@ -122,7 +122,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
                         lastActivity: lastActivity || site.lastActivity,
                         totalPages: totalPages,
                         totalErrors: totalErrors,
-                        status: isScanned ? 'connected' as const : site.status,
+                        status: site.status, // Trust the backend connection_status - don't override
                         activeScanId: isScanActive ? activeScan?.scan_id : undefined,
                         scanState: (() => {
                             if (!isScanActive) return isScanned ? 'completed' : undefined;

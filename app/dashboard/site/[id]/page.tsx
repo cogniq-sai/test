@@ -55,6 +55,7 @@ export default function SiteDashboardPage() {
     const [errorCount, setErrorCount] = useState(0);
     const aiPollRef = useRef<NodeJS.Timeout | null>(null);
     const [isCheckingData, setIsCheckingData] = useState(true); // Loading state for initial data check
+    const [isCopied, setIsCopied] = useState(false);
 
     // Check connection status
     const handleCheckConnection = async () => {
@@ -370,7 +371,13 @@ export default function SiteDashboardPage() {
         try {
             await selectRedirectOption(token, id, "custom", customUrl);
             // Custom selections stay pending until explicitly approved
-            setAiSuggestions(prev => prev.map(s => s.id === id ? { ...s, status: "pending", selected_option: "custom", custom_redirect_url: customUrl } : s));
+            // We update the local state so the UI shows the new custom URL immediately
+            setAiSuggestions(prev => prev.map(s => s.id === id ? {
+                ...s,
+                status: "pending",
+                selected_option: "custom",
+                custom_redirect_url: customUrl
+            } : s));
         } catch (error) {
             console.error("Failed to set custom redirect:", error);
         } finally {
@@ -384,7 +391,12 @@ export default function SiteDashboardPage() {
         setRedirectActionLoading(true);
         try {
             await approveRedirect(token, id);
-            setAiSuggestions(prev => prev.map(s => s.id === id ? { ...s, status: "approved" } : s));
+            // When approving a custom URL, verify that 'custom' is the selected_option
+            setAiSuggestions(prev => prev.map(s => s.id === id ? {
+                ...s,
+                status: "approved",
+                selected_option: s.selected_option || "custom" // Ensure selected_option is set
+            } : s));
         } catch (error) {
             console.error("Failed to approve custom redirect:", error);
         } finally {
@@ -397,15 +409,49 @@ export default function SiteDashboardPage() {
         if (!pluginConnected) { setShowPluginModal(true); return; }
         setRedirectActionLoading(true);
         try {
+            // Optimistic update: Show "Reverting..." immediately
+            setAiSuggestions(prev => prev.map(s => s.id === id ? { ...s, status: "reverted" as const } : s));
+
             await undoRedirect(token, id);
-            // Reset back to pending so user sees original AI suggestions
-            setAiSuggestions(prev => prev.map(s => s.id === id ? { ...s, status: "pending" as const, selected_option: null } : s));
+
+            // REMOVED: Do not manually reset to pending. 
+            // Let the polling logic handle the transition when backend confirms it.
+            // This ensures "Reverting..." stays visible until the action is fully effectively synced.
         } catch (error) {
             console.error("Failed to undo redirect:", error);
+            // Revert optimistic update on error (back to previous state?) 
+            // We might not know previous state easily here without extra tracking, 
+            // but refreshing data is safest.
+            refreshData();
         } finally {
             setRedirectActionLoading(false);
         }
     };
+
+    // Poll for status updates (Applying -> Live)
+    // Poll for status updates (Applying -> Live)
+    useEffect(() => {
+        if (!token || !siteId) return;
+
+        // Check if we have any items in "Applying" (approved) or "Reverting" (reverted) state
+        const pendingItems = aiSuggestions.filter(s => s.status === 'approved' || s.status === 'reverted');
+
+        if (pendingItems.length === 0) return;
+
+        const intervalId = setInterval(async () => {
+            try {
+                // Fetch latest suggestions to get updated statuses
+                const response = await getRedirectSuggestions(token, siteId);
+                if (response.success && response.suggestions) {
+                    setAiSuggestions(response.suggestions);
+                }
+            } catch (error) {
+                console.error("Polling error:", error);
+            }
+        }, 5000); // Poll every 5 seconds
+
+        return () => clearInterval(intervalId);
+    }, [aiSuggestions, token, siteId]);
 
     // Calculate stats
     const stats = {
@@ -503,7 +549,11 @@ export default function SiteDashboardPage() {
                                         <span
                                             className="inline-flex items-center gap-2 px-3 py-1 text-xs font-semibold rounded-full bg-amber-50 text-amber-700 border border-amber-200 cursor-pointer hover:bg-amber-100 transition-colors"
                                             onClick={() => {
-                                                navigator.clipboard.writeText(siteInfo.apiKey);
+                                                if (siteInfo.apiKey) {
+                                                    navigator.clipboard.writeText(siteInfo.apiKey);
+                                                    setIsCopied(true);
+                                                    setTimeout(() => setIsCopied(false), 2000);
+                                                }
                                             }}
                                             title="Click to copy API key"
                                         >
@@ -511,7 +561,16 @@ export default function SiteDashboardPage() {
                                             Plugin Offline
                                             <span className="text-amber-500">•</span>
                                             <span className="font-mono text-amber-600">{siteInfo.apiKey.slice(0, 8)}…</span>
-                                            <svg className="w-3 h-3 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2" /></svg>
+                                            {isCopied ? (
+                                                <svg className="w-3 h-3 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                                </svg>
+                                            ) : (
+                                                <svg className="w-3 h-3 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <rect x="9" y="9" width="13" height="13" rx="2" strokeWidth="2" />
+                                                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" strokeWidth="2" />
+                                                </svg>
+                                            )}
                                         </span>
                                     ) : (
                                         <span className="text-sm text-gray-500">
@@ -769,7 +828,14 @@ export default function SiteDashboardPage() {
                                         </div>
                                     ) : (
                                         <RedirectTable
-                                            suggestions={aiSuggestions}
+                                            suggestions={[...aiSuggestions].sort((a, b) => {
+                                                // Internal links (with AI suggestions) first, external links second
+                                                const aIsInternal = !!a.primary_url;
+                                                const bIsInternal = !!b.primary_url;
+                                                if (aIsInternal && !bIsInternal) return -1;
+                                                if (!aIsInternal && bIsInternal) return 1;
+                                                return 0;
+                                            })}
                                             siteUrl={siteInfo?.url}
                                             onApprove={handleApprove}
                                             onReject={handleReject}
