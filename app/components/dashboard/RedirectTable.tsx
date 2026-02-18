@@ -405,7 +405,7 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
                 {pendingFiltered.length > 0 && (
                     <div className="flex items-center gap-2 flex-wrap bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
                         {/* Quick select chips */}
-                        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider mr-1">Select:</span>
+                        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider mr-1">Select :</span>
 
                         {/* All Pending */}
                         <button
