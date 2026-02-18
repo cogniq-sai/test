@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, Fragment } from "react";
+import { useState, useMemo, Fragment, useCallback } from "react";
 import type { RedirectSuggestion } from "../../lib/api/redirects";
 
 type FilterType = "all" | "internal" | "external";
@@ -14,6 +14,9 @@ interface RedirectTableProps {
     onApproveCustom: (id: string) => void;
     onUndo?: (id: string) => void;
     onUnlink?: (id: string) => void;
+    onBulkApprove?: (ids: string[]) => void;
+    onBulkReject?: (ids: string[]) => void;
+    onBulkUnlink?: (ids: string[]) => void;
     isLoading?: boolean;
 }
 
@@ -29,12 +32,17 @@ function isInternalUrl(brokenUrl: string, siteUrl?: string): boolean {
     }
 }
 
-export default function RedirectTable({ suggestions, siteUrl, onApprove, onReject, onEditCustom, onApproveCustom, onUndo, onUnlink, isLoading }: RedirectTableProps) {
+export default function RedirectTable({ suggestions, siteUrl, onApprove, onReject, onEditCustom, onApproveCustom, onUndo, onUnlink, onBulkApprove, onBulkReject, onBulkUnlink, isLoading }: RedirectTableProps) {
     const [expandedRow, setExpandedRow] = useState<string | null>(null);
     const [editingRow, setEditingRow] = useState<string | null>(null);
     const [editValue, setEditValue] = useState("");
     const [selectedOptions, setSelectedOptions] = useState<Record<string, "primary" | "alternative" | "custom">>({});
     const [activeFilter, setActiveFilter] = useState<FilterType>("all");
+
+    // ── Bulk Selection State ──
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [minConfidence, setMinConfidence] = useState<number>(0);
+    const [confidenceInput, setConfidenceInput] = useState<string>("");
 
     // Counts for filter badges
     const counts = useMemo(() => {
@@ -54,6 +62,132 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
             return activeFilter === "internal" ? isInternal : !isInternal;
         });
     }, [suggestions, activeFilter, siteUrl]);
+
+    // Only pending items within the current filter
+    const pendingFiltered = useMemo(() =>
+        filtered.filter(s => s.status === "pending"),
+        [filtered]);
+
+    // Pending internal items matching confidence threshold
+    const pendingInternalAboveConf = useMemo(() =>
+        pendingFiltered.filter(s => {
+            const isInternal = isInternalUrl(s.broken_url, siteUrl);
+            if (!isInternal) return false;
+            const conf = s.primary_confidence ?? 0;
+            return conf >= minConfidence;
+        }),
+        [pendingFiltered, siteUrl, minConfidence]);
+
+    // Pending external items in current filter
+    const pendingExternalFiltered = useMemo(() =>
+        pendingFiltered.filter(s => !isInternalUrl(s.broken_url, siteUrl)),
+        [pendingFiltered, siteUrl]);
+
+    // ── Derived selection info ──
+    const selectedCount = selectedIds.size;
+    const selectedSuggestions = useMemo(() =>
+        suggestions.filter(s => selectedIds.has(s.id)),
+        [suggestions, selectedIds]);
+    const selectedInternalPending = useMemo(() =>
+        selectedSuggestions.filter(s => s.status === "pending" && isInternalUrl(s.broken_url, siteUrl)),
+        [selectedSuggestions, siteUrl]);
+    const selectedExternalPending = useMemo(() =>
+        selectedSuggestions.filter(s => s.status === "pending" && !isInternalUrl(s.broken_url, siteUrl)),
+        [selectedSuggestions, siteUrl]);
+
+    // ── Selection Helpers ──
+    const toggleSelect = useCallback((id: string) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    }, []);
+
+    const selectAll = useCallback(() => {
+        setSelectedIds(new Set(pendingFiltered.map(s => s.id)));
+    }, [pendingFiltered]);
+
+    const selectNone = useCallback(() => {
+        setSelectedIds(new Set());
+    }, []);
+
+    const selectInternalOnly = useCallback(() => {
+        setSelectedIds(new Set(pendingInternalAboveConf.map(s => s.id)));
+    }, [pendingInternalAboveConf]);
+
+    const selectExternalOnly = useCallback(() => {
+        setSelectedIds(new Set(pendingExternalFiltered.map(s => s.id)));
+    }, [pendingExternalFiltered]);
+
+    const handleConfidenceChange = useCallback((value: string) => {
+        setConfidenceInput(value);
+        const num = parseInt(value, 10);
+        if (!isNaN(num) && num >= 0 && num <= 100) {
+            setMinConfidence(num);
+        } else if (value === "") {
+            setMinConfidence(0);
+        }
+    }, []);
+
+    const applyConfidenceFilter = useCallback(() => {
+        // Select all pending internal items with confidence >= threshold
+        const matching = pendingFiltered.filter(s => {
+            const isInternal = isInternalUrl(s.broken_url, siteUrl);
+            if (!isInternal) return false;
+            const conf = s.primary_confidence ?? 0;
+            return conf >= minConfidence;
+        });
+        setSelectedIds(new Set(matching.map(s => s.id)));
+    }, [pendingFiltered, siteUrl, minConfidence]);
+
+    // ── Select All checkbox logic ──
+    const allPendingSelected = pendingFiltered.length > 0 && pendingFiltered.every(s => selectedIds.has(s.id));
+    const somePendingSelected = pendingFiltered.some(s => selectedIds.has(s.id));
+
+    // ── Bulk Action Handlers ──
+    const handleBulkApprove = useCallback(() => {
+        const ids = selectedInternalPending.map(s => s.id);
+        if (ids.length === 0) return;
+        if (onBulkApprove) {
+            onBulkApprove(ids);
+        } else {
+            // Fallback: call single approve for each
+            ids.forEach(id => {
+                const s = suggestions.find(x => x.id === id);
+                if (s) {
+                    const opt = selectedOptions[s.id] || (s.selected_option === "custom" ? "custom" : "primary");
+                    if (opt === "custom") onApproveCustom(id);
+                    else onApprove(id, opt as "primary" | "alternative");
+                }
+            });
+        }
+        setSelectedIds(new Set());
+    }, [selectedInternalPending, onBulkApprove, suggestions, selectedOptions, onApprove, onApproveCustom]);
+
+    const handleBulkReject = useCallback(() => {
+        // Only reject internal pending items — external links should use Remove Link, not Reject
+        const ids = selectedInternalPending.map(s => s.id);
+        if (ids.length === 0) return;
+        if (onBulkReject) {
+            onBulkReject(ids);
+        } else {
+            ids.forEach(id => onReject(id));
+        }
+        setSelectedIds(new Set());
+    }, [selectedInternalPending, onBulkReject, onReject]);
+
+    const handleBulkUnlink = useCallback(() => {
+        const ids = selectedExternalPending.map(s => s.id);
+        if (ids.length === 0) return;
+        if (onBulkUnlink) {
+            onBulkUnlink(ids);
+        } else {
+            ids.forEach(id => onUnlink?.(id));
+        }
+        setSelectedIds(new Set());
+    }, [selectedExternalPending, onBulkUnlink, onUnlink]);
 
     const toggleExpand = (id: string) => {
         setExpandedRow(prev => prev === id ? null : id);
@@ -148,51 +282,202 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
 
     return (
         <div className="space-y-4">
-            {/* ─── Filter Bar ─── */}
-            <div className="flex items-center justify-end flex-wrap gap-3">
-                <div className="inline-flex items-center bg-gray-100 rounded-xl p-1 gap-0.5">
-                    {(["all", "internal", "external"] as FilterType[]).map((f) => (
-                        <button
-                            key={f}
-                            onClick={() => setActiveFilter(f)}
-                            className={`
-                                inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
-                                ${activeFilter === f
-                                    ? "bg-white text-gray-900 shadow-sm"
-                                    : "text-gray-500 hover:text-gray-700"
-                                }
-                            `}
-                        >
-                            {f === "all" && (
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                                </svg>
-                            )}
-                            {f === "internal" && (
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1" />
-                                </svg>
-                            )}
-                            {f === "external" && (
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                </svg>
-                            )}
-                            <span className="capitalize">{f}</span>
-                            <span className={`
-                                inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-md text-xs font-semibold
-                                ${activeFilter === f ? "bg-gray-900 text-white" : "bg-gray-200 text-gray-600"}
-                            `}>
-                                {counts[f]}
-                            </span>
-                        </button>
-                    ))}
+            {/* ─── Filter Bar + Bulk Toolbar ─── */}
+            <div className="flex flex-col gap-3">
+                {/* Row 1: Filter tabs (left) + Bulk actions (right) */}
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                    {/* Filter tabs */}
+                    <div className="inline-flex items-center bg-gray-100 rounded-xl p-1 gap-0.5">
+                        {(["all", "internal", "external"] as FilterType[]).map((f) => (
+                            <button
+                                key={f}
+                                onClick={() => { setActiveFilter(f); setSelectedIds(new Set()); }}
+                                className={`
+                                    inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
+                                    ${activeFilter === f
+                                        ? "bg-white text-gray-900 shadow-sm"
+                                        : "text-gray-500 hover:text-gray-700"
+                                    }
+                                `}
+                            >
+                                {f === "all" && (
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                                    </svg>
+                                )}
+                                {f === "internal" && (
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1" />
+                                    </svg>
+                                )}
+                                {f === "external" && (
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                    </svg>
+                                )}
+                                <span className="capitalize">{f}</span>
+                                <span className={`
+                                    inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-md text-xs font-semibold
+                                    ${activeFilter === f ? "bg-gray-900 text-white" : "bg-gray-200 text-gray-600"}
+                                `}>
+                                    {counts[f]}
+                                </span>
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Right side: loading indicator OR bulk action buttons */}
+                    <div className="flex items-center gap-2">
+                        {isLoading && (
+                            <div className="flex items-center gap-2 text-sm text-blue-600">
+                                <div className="w-4 h-4 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+                                <span>Updating...</span>
+                            </div>
+                        )}
+
+                        {/* Bulk action buttons — only visible when items are selected */}
+                        {selectedCount > 0 && (
+                            <div className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-xl px-2.5 py-2 shadow-sm animate-in fade-in duration-200">
+                                <span className="text-xs font-semibold text-gray-500 pr-1.5 border-r border-gray-200 mr-0.5">
+                                    {selectedCount} selected
+                                </span>
+
+                                {/* Approve — only for internal pending */}
+                                {selectedInternalPending.length > 0 && (
+                                    <button
+                                        onClick={handleBulkApprove}
+                                        disabled={isLoading}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg transition-colors disabled:opacity-50"
+                                    >
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                        </svg>
+                                        Approve {selectedInternalPending.length}
+                                    </button>
+                                )}
+
+                                {/* Remove Links — only for external pending */}
+                                {selectedExternalPending.length > 0 && (
+                                    <button
+                                        onClick={handleBulkUnlink}
+                                        disabled={isLoading}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors disabled:opacity-50"
+                                    >
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.172 13.828a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                            <line x1="4" y1="4" x2="20" y2="20" strokeWidth={2} strokeLinecap="round" />
+                                        </svg>
+                                        Remove Links {selectedExternalPending.length}
+                                    </button>
+                                )}
+
+                                {/* Reject — only for internal pending */}
+                                {selectedInternalPending.length > 0 && (
+                                    <button
+                                        onClick={handleBulkReject}
+                                        disabled={isLoading}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors disabled:opacity-50"
+                                    >
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                        Reject {selectedInternalPending.length}
+                                    </button>
+                                )}
+
+                                {/* Clear */}
+                                <button
+                                    onClick={selectNone}
+                                    className="ml-0.5 p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                                    title="Clear selection"
+                                >
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 </div>
 
-                {isLoading && (
-                    <div className="flex items-center gap-2 text-sm text-blue-600">
-                        <div className="w-4 h-4 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
-                        Updating...
+                {/* Row 2: Bulk Selection Toolbar — only show when there are pending items */}
+                {pendingFiltered.length > 0 && (
+                    <div className="flex items-center gap-2 flex-wrap bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5">
+                        {/* Quick select chips */}
+                        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider mr-1">Select:</span>
+
+                        {/* All Pending */}
+                        <button
+                            onClick={allPendingSelected ? selectNone : selectAll}
+                            className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all duration-150 ${allPendingSelected
+                                ? "bg-blue-50 text-blue-700 border-blue-200"
+                                : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50 hover:border-gray-300"
+                                }`}
+                        >
+                            All Pending ({pendingFiltered.length})
+                        </button>
+
+                        {/* Internal only — always shown, grayed when no internal pending */}
+                        {(activeFilter === "all" || activeFilter === "internal") && (
+                            <button
+                                onClick={pendingInternalAboveConf.length > 0 ? selectInternalOnly : undefined}
+                                disabled={pendingInternalAboveConf.length === 0}
+                                className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all duration-150 ${pendingInternalAboveConf.length === 0
+                                    ? "bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed"
+                                    : pendingInternalAboveConf.every(s => selectedIds.has(s.id)) && selectedIds.size === pendingInternalAboveConf.length
+                                        ? "bg-blue-50 text-blue-700 border-blue-200"
+                                        : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50 hover:border-gray-300"
+                                    }`}
+                            >
+                                Internal only ({pendingInternalAboveConf.length})
+                            </button>
+                        )}
+
+                        {/* External only — always shown, grayed when no external pending */}
+                        {(activeFilter === "all" || activeFilter === "external") && (
+                            <button
+                                onClick={pendingExternalFiltered.length > 0 ? selectExternalOnly : undefined}
+                                disabled={pendingExternalFiltered.length === 0}
+                                className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all duration-150 ${pendingExternalFiltered.length === 0
+                                    ? "bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed"
+                                    : pendingExternalFiltered.every(s => selectedIds.has(s.id)) && selectedIds.size === pendingExternalFiltered.length
+                                        ? "bg-amber-50 text-amber-700 border-amber-200"
+                                        : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50 hover:border-gray-300"
+                                    }`}
+                            >
+                                External only ({pendingExternalFiltered.length})
+                            </button>
+                        )}
+
+                        {/* Divider */}
+                        <div className="h-5 w-px bg-gray-200 mx-1" />
+
+                        {/* Confidence threshold */}
+                        <div className="flex items-center gap-1.5">
+                            <label className="text-xs font-medium text-gray-400 whitespace-nowrap">Min confidence:</label>
+                            <div className="relative">
+                                <input
+                                    type="number"
+                                    min={0}
+                                    max={100}
+                                    value={confidenceInput}
+                                    onChange={(e) => handleConfidenceChange(e.target.value)}
+                                    onKeyDown={(e) => e.key === "Enter" && applyConfidenceFilter()}
+                                    placeholder=""
+                                    className="w-14 pl-2 pr-5 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent bg-white text-gray-700 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                />
+                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">%</span>
+                            </div>
+                            <button
+                                onClick={applyConfidenceFilter}
+                                disabled={!confidenceInput}
+                                className="px-2.5 py-1 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                title={`Select internal pending links with ≥${minConfidence}% confidence`}
+                            >
+                                Apply
+                            </button>
+                        </div>
                     </div>
                 )}
             </div>
@@ -201,14 +486,27 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
             <div className="overflow-hidden rounded-xl border border-gray-200">
                 <table className="w-full table-fixed">
                     <colgroup>
-                        <col className="w-[30%]" />
+                        <col className="w-[28px]" />
                         <col className="w-[28%]" />
+                        <col className="w-[26%]" />
                         <col className="w-[10%]" />
-                        <col className="w-[14%]" />
-                        <col className="w-[18%]" />
+                        <col className="w-[13%]" />
+                        <col className="w-[17%]" />
                     </colgroup>
                     <thead>
                         <tr className="bg-gray-50 border-b border-gray-200">
+                            {/* Select All Checkbox */}
+                            <th className="pl-3 pr-1 py-3.5 text-center">
+                                {pendingFiltered.length > 0 && (
+                                    <input
+                                        type="checkbox"
+                                        checked={allPendingSelected}
+                                        ref={(el) => { if (el) el.indeterminate = somePendingSelected && !allPendingSelected; }}
+                                        onChange={() => allPendingSelected ? selectNone() : selectAll()}
+                                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+                                    />
+                                )}
+                            </th>
                             <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Source URL</th>
                             <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Redirection</th>
                             <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Confidence</th>
@@ -223,10 +521,24 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
                             const conf = getActiveConfidence(s);
                             const cd = confidenceDot(conf);
                             const isInternal = isInternalUrl(s.broken_url, siteUrl);
+                            const isSelected = selectedIds.has(s.id);
+                            const isPending = s.status === "pending";
 
                             return (
                                 <Fragment key={s.id}>
-                                    <tr className="group hover:bg-gray-50/50 transition-colors">
+                                    <tr className={`group transition-colors ${isSelected ? "bg-blue-50/60" : "hover:bg-gray-50/50"}`}>
+                                        {/* Checkbox */}
+                                        <td className="pl-3 pr-1 py-4 align-top text-center">
+                                            {isPending && (
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={() => toggleSelect(s.id)}
+                                                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+                                                />
+                                            )}
+                                        </td>
+
                                         {/* Source URL */}
                                         <td className="px-5 py-4 align-top">
                                             <div className="flex items-start gap-2 min-w-0">
@@ -507,7 +819,7 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
                                     {
                                         isExpanded && getActiveOption(s) !== "custom" && (
                                             <tr className="bg-gradient-to-r from-blue-50/80 via-indigo-50/40 to-blue-50/80 animate-in fade-in slide-in-from-top-2 duration-200">
-                                                <td colSpan={5} className="px-5 py-3">
+                                                <td colSpan={6} className="px-5 py-3">
                                                     <p className="text-sm text-gray-700 leading-relaxed">
                                                         <span className="font-semibold text-blue-700">AI Reasoning:</span>{" "}
                                                         {getActiveReason(s)}
@@ -547,6 +859,7 @@ export default function RedirectTable({ suggestions, siteUrl, onApprove, onRejec
                     </div>
                 )
             }
-        </div >
+
+        </div>
     );
 }
