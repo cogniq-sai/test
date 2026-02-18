@@ -404,6 +404,20 @@ export default function SiteDashboardPage() {
         }
     };
 
+    const handleUnlink = async (id: string) => {
+        if (!token) return;
+        if (!pluginConnected) { setShowPluginModal(true); return; }
+        setRedirectActionLoading(true);
+        try {
+            await selectRedirectOption(token, id, "unlinked" as any);
+            setAiSuggestions(prev => prev.map(s => s.id === id ? { ...s, status: "approved", selected_option: "unlinked" } : s));
+        } catch (error) {
+            console.error("Failed to unlink:", error);
+        } finally {
+            setRedirectActionLoading(false);
+        }
+    };
+
     const handleUndo = async (id: string) => {
         if (!token) return;
         if (!pluginConnected) { setShowPluginModal(true); return; }
@@ -842,6 +856,7 @@ export default function SiteDashboardPage() {
                                             onEditCustom={handleEditCustom}
                                             onApproveCustom={handleApproveCustom}
                                             onUndo={handleUndo}
+                                            onUnlink={handleUnlink}
                                             isLoading={redirectActionLoading}
                                         />
                                     )}
