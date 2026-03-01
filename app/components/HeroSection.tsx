@@ -25,7 +25,7 @@ const HeroSection = () => {
                     {/* Badge */}
                     <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-sm border border-blue-100 rounded-full text-sm font-medium text-blue-700 mb-8 shadow-sm">
                         <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                        AI-Powered SEOFlow
+                        AI-Powered AutoRankr
                     </div>
 
                     {/* Heading */}

@@ -10,8 +10,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "SEOFlow AI – AI SEO Automation Platform",
-  description: "SEOFlow AI is an AI-powered SEO platform that helps you optimize your website for search engines.",
+  title: "AutoRankr AI – AI SEO Automation Platform",
+  description: "AutoRankr AI is an AI-powered SEO platform that helps you optimize your website for search engines.",
 };
 
 export default function RootLayout({

@@ -90,7 +90,7 @@ export default function PluginSetupModal({ siteUrl, apiKey, onCheckConnection, o
                         <div className="flex gap-4">
                             <div className="flex-shrink-0 w-6 h-6 rounded-full bg-gradient-to-br from-blue-600 to-cyan-500 text-white text-[10px] font-bold flex items-center justify-center mt-0.5 shadow-sm shadow-blue-500/20">1</div>
                             <div>
-                                <p className="text-sm font-semibold text-gray-900">Install SEOFlow AI Plugin</p>
+                                <p className="text-sm font-semibold text-gray-900">Install AutoRankr AI Plugin</p>
                                 <a
                                     href={wpAdminUrl}
                                     target="_blank"
@@ -110,7 +110,7 @@ export default function PluginSetupModal({ siteUrl, apiKey, onCheckConnection, o
                             <div className="flex-shrink-0 w-6 h-6 rounded-full bg-gradient-to-br from-blue-600 to-cyan-500 text-white text-[10px] font-bold flex items-center justify-center mt-0.5 shadow-sm shadow-blue-500/20">2</div>
                             <div>
                                 <p className="text-sm font-semibold text-gray-900">Go to Plugin Settings</p>
-                                <p className="text-xs text-gray-500 mt-1">Found under <span className="font-semibold text-gray-700">SEOFlow AI → Settings</span> in your WP sidebar.</p>
+                                <p className="text-xs text-gray-500 mt-1">Found under <span className="font-semibold text-gray-700">AutoRankr AI → Settings</span> in your WP sidebar.</p>
                             </div>
                         </div>
 

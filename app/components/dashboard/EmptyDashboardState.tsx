@@ -17,7 +17,7 @@ export default function EmptyDashboardState({ onAddSite }: EmptyDashboardStatePr
 
                 {/* Title */}
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                    Get Started with SEOFlow AI
+                    Get Started with AutoRankr AI
                 </h2>
 
                 {/* Description */}
