@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "../context/AuthContext";
 import { useDashboard } from "../context/DashboardContext";
 import Link from "next/link";
-import { deleteSite, removeStoredSite, Site } from "../lib/api";
+import { deleteSite, removeStoredSite, addSite, startScan, Site } from "../lib/api";
 import EmptyDashboardState from "../components/dashboard/EmptyDashboardState";
 import AddSiteModal from "../components/dashboard/AddSiteModal";
 import SiteCard from "../components/dashboard/SiteCard";
@@ -20,11 +20,53 @@ export default function DashboardPage() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [hasMounted, setHasMounted] = useState(false);
+    const [pendingScanProcessed, setPendingScanProcessed] = useState(false);
+    const [isProcessingPendingScan, setIsProcessingPendingScan] = useState(false);
 
     // Initial mount check to prevent hydration mismatch
     useEffect(() => {
         setHasMounted(true);
     }, []);
+
+    // Auto-add site + auto-start scan from pending_scan_url (set by landing page ScanModal)
+    useEffect(() => {
+        if (pendingScanProcessed || !isAuthenticated || !token || !user?.id) return;
+
+        const pendingUrl = localStorage.getItem("pending_scan_url");
+        if (!pendingUrl) return;
+
+        setPendingScanProcessed(true);
+        setIsProcessingPendingScan(true);
+        // Clear immediately to prevent re-triggering
+        localStorage.removeItem("pending_scan_url");
+
+        const autoAddAndScan = async () => {
+            try {
+                // 1. Register the site
+                const siteResponse = await addSite(token, pendingUrl, user.id);
+
+                // 2. Start scan immediately
+                try {
+                    await startScan(token, {
+                        site_id: siteResponse.site_id,
+                        url: pendingUrl,
+                    });
+                } catch (scanErr) {
+                    console.warn("Auto-scan failed (site was still added):", scanErr);
+                }
+
+                // 3. Navigate to the site detail page
+                router.push(`/dashboard/site/${siteResponse.site_id}`);
+            } catch (err) {
+                console.error("Auto-add site failed:", err);
+                setIsProcessingPendingScan(false);
+                // Fallback: just stay on dashboard, user can add manually
+                refreshData();
+            }
+        };
+
+        autoAddAndScan();
+    }, [isAuthenticated, token, user?.id, pendingScanProcessed, router, refreshData]);
 
     // Search, Filter, and Sort state
     const [searchQuery, setSearchQuery] = useState('');
@@ -146,12 +188,20 @@ export default function DashboardPage() {
         return filteredAndSortedSites.slice(startIndex, endIndex);
     }, [filteredAndSortedSites, currentPage, itemsPerPage]);
 
-    if (!hasMounted || isInitializing || isLoading) {
+    if (!hasMounted || isInitializing || isLoading || isProcessingPendingScan) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-cyan-50">
-                <div className="flex flex-col items-center gap-4">
-                    <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                    <div className="text-gray-600 font-medium">Preparing your dashboard...</div>
+                <div className="flex flex-col items-center gap-6">
+                    <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-cyan-500 rounded-2xl flex items-center justify-center mx-auto shadow-lg shadow-blue-500/25 animate-pulse">
+                        <svg className="w-8 h-8 text-white animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </div>
+                    <div className="text-center">
+                        <h3 className="text-xl font-bold text-gray-900 mb-2">Setting up your site...</h3>
+                        <p className="text-gray-500 font-medium">We are adding your website and starting the AI scan.</p>
+                    </div>
                 </div>
             </div>
         );

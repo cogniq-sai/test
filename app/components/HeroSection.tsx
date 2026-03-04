@@ -1,10 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import Link from "next/link";
+import ScanModal from "./ScanModal";
 
 const HeroSection = () => {
     const { isAuthenticated, isInitializing } = useAuth();
+    const [isScanModalOpen, setIsScanModalOpen] = useState(false);
 
     return (
         <section className="min-h-screen flex items-center relative overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-cyan-50">
@@ -56,15 +59,15 @@ const HeroSection = () => {
                                 </svg>
                             </Link>
                         ) : (
-                            <Link
-                                href="/login"
-                                className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-blue-600 to-cyan-500 text-white rounded-xl font-semibold text-lg hover:opacity-90 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                            <button
+                                onClick={() => setIsScanModalOpen(true)}
+                                className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-blue-600 to-cyan-500 text-white rounded-xl font-bold text-lg shadow-lg shadow-blue-500/25 hover:shadow-xl hover:shadow-blue-500/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
                             >
-                                Login to Dashboard
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                                 </svg>
-                            </Link>
+                                Scan Your Site
+                            </button>
                         )}
 
                         <button className="inline-flex items-center gap-2 px-8 py-4 bg-white border-2 border-gray-200 rounded-xl text-gray-700 font-semibold text-lg">
@@ -93,6 +96,9 @@ const HeroSection = () => {
 
                 </div>
             </div>
+
+            {/* Scan Modal */}
+            <ScanModal isOpen={isScanModalOpen} onClose={() => setIsScanModalOpen(false)} />
 
         </section>
     );

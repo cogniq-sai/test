@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useAuth } from "../../../context/AuthContext";
 import { useDashboard } from "../../../context/DashboardContext";
 import RedirectTable from "../../../components/dashboard/RedirectTable";
-import { getSites, deleteSite, removeStoredSite, getScanErrors, getAllPages, generateRedirects, getRedirectSuggestions, selectRedirectOption, rejectSuggestion, approveRedirect, undoRedirect } from "../../../lib/api";
+import { getSites, deleteSite, removeStoredSite, getScanErrors, getAllPages, generateRedirects, getRedirectSuggestions, selectRedirectOption, rejectSuggestion, approveRedirect, undoRedirect, getAllActiveScans } from "../../../lib/api";
 import type { RedirectSuggestion } from "../../../lib/api";
 import ScannerCard from "../../../components/dashboard/ScannerCard";
 import PluginSetupModal from "../../../components/dashboard/PluginSetupModal";
@@ -43,6 +43,7 @@ export default function SiteDashboardPage() {
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [deleteError, setDeleteError] = useState<string | null>(null);
+    const [activeScanId, setActiveScanId] = useState<string | null>(null);
 
     // Plugin connection state
     const [pluginConnected, setPluginConnected] = useState(false);
@@ -212,12 +213,28 @@ export default function SiteDashboardPage() {
             }
 
             try {
-                // Try to fetch existing pages, errors, and AI suggestions
-                const [pagesResponse, errorsResponse] = await Promise.all([
+                // Try to fetch existing pages, errors, active scans
+                const [pagesResponse, errorsResponse, activeScansResponse] = await Promise.all([
                     getAllPages(siteId),
-                    getScanErrors(token, siteId)
+                    getScanErrors(token, siteId),
+                    getAllActiveScans(token).catch(() => ({ active_scans: [] }))
                 ]);
 
+                // 1. Check if a scan is currently running
+                const activeScan = activeScansResponse.active_scans?.find((s: any) =>
+                    s.site_id === siteId && (s.state === "running" || s.state === "queued" || s.state === "paused")
+                );
+
+                if (activeScan) {
+                    setScanState(activeScan.state === "paused" ? "idle" : "scanning");
+                    if (activeScan.state !== "paused") {
+                        setActiveScanId(activeScan.scan_id);
+                    }
+                    setIsCheckingData(false);
+                    return; // Exit early since it's scanning
+                }
+
+                // 2. Otherwise check if there is completed data
                 const hasPages = pagesResponse.success && pagesResponse.pages && pagesResponse.pages.length > 0;
                 const hasErrors = errorsResponse.success && errorsResponse.errors && errorsResponse.errors.length > 0;
 
@@ -627,6 +644,7 @@ export default function SiteDashboardPage() {
                             siteId={siteId}
                             siteUrl={siteInfo.url}
                             token={token || ""}
+                            initialScanId={activeScanId}
                             onScanComplete={handleScanComplete}
                         />
                     </div>

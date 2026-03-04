@@ -16,12 +16,13 @@ interface ScannerCardProps {
     siteId: string;
     siteUrl: string;
     token: string;
+    initialScanId?: string | null;
     onScanComplete?: (results: ScanError[]) => void;
 }
 
 type ScanStatus = "idle" | "scanning" | "complete" | "error" | "paused";
 
-export default function ScannerCard({ siteId, siteUrl, token, onScanComplete }: ScannerCardProps) {
+export default function ScannerCard({ siteId, siteUrl, token, initialScanId, onScanComplete }: ScannerCardProps) {
     const [status, setStatus] = useState<ScanStatus>("idle");
     const [progress, setProgress] = useState(0);
     const [pagesCrawled, setPagesCrawled] = useState(0);
@@ -30,6 +31,20 @@ export default function ScannerCard({ siteId, siteUrl, token, onScanComplete }: 
     const [scanId, setScanId] = useState<string | null>(null);
     const [isPauseResumeLoading, setIsPauseResumeLoading] = useState(false);
     const pollingInterval = useRef<NodeJS.Timeout | null>(null);
+
+    // Sync with initialScanId if provided (e.g. auto-scan from dashboard)
+    useEffect(() => {
+        if (initialScanId && status === "idle") {
+            setScanId(initialScanId);
+            setStatus("scanning");
+            pollingInterval.current = setInterval(() => {
+                pollStatus(initialScanId);
+            }, 3000);
+
+            // Do an immediate poll to get current progress
+            pollStatus(initialScanId);
+        }
+    }, [initialScanId, status]);
 
     // Cleanup interval on unmount
     useEffect(() => {
@@ -71,7 +86,7 @@ export default function ScannerCard({ siteId, siteUrl, token, onScanComplete }: 
                 setScanId(null);
             } else if (response.state === "paused") {
                 setStatus("paused");
-            } else if (response.state === "running") {
+            } else if (response.state === "running" || response.state === "queued") {
                 setStatus("scanning");
             }
         } catch (err) {
