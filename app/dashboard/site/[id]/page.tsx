@@ -229,7 +229,7 @@ export default function SiteDashboardPage() {
                         const mappedPages: CrawledPage[] = pagesResponse.pages.map((p: any) => ({
                             url: p.url,
                             title: p.title,
-                            statusCode: p.statusCode || 200,
+                            statusCode: p.statusCode || p.status_code || 200,
                             crawledAt: p.crawledAt || p.crawled_at || p.created_at || p.last_updated
                         }));
                         setPages(mappedPages);
@@ -241,6 +241,18 @@ export default function SiteDashboardPage() {
 
                     // Load existing AI suggestions
                     await fetchAiSuggestions();
+                } else if (user?.id) {
+                    // Fallback: Check backend scan_status even if no pages/errors in DB
+                    // This handles the case where a scan completed but DB writes failed
+                    try {
+                        const sitesResponse = await getSites(user.id);
+                        const currentSite = sitesResponse.sites.find(s => s.id === siteId);
+                        if (currentSite?.scanState === "completed" || currentSite?.totalPages && currentSite.totalPages > 0) {
+                            setScanState("completed");
+                        }
+                    } catch (err) {
+                        console.warn("Failed to check site scan status:", err);
+                    }
                 }
             } catch (error) {
                 console.error("Failed to check existing scan data:", error);
@@ -254,7 +266,7 @@ export default function SiteDashboardPage() {
         } else {
             setIsCheckingData(false);
         }
-    }, [siteId, token, isAuthenticated, fetchAiSuggestions]);
+    }, [siteId, token, isAuthenticated, fetchAiSuggestions, user?.id]);
 
     const fetchDiscoveredPages = async () => {
         if (!siteId) return;
@@ -617,6 +629,31 @@ export default function SiteDashboardPage() {
                             token={token || ""}
                             onScanComplete={handleScanComplete}
                         />
+                    </div>
+                )}
+
+                {/* Compact Re-scan button when scan is completed */}
+                {scanState === "completed" && siteInfo && (
+                    <div className="mb-6 flex items-center justify-between bg-white/80 backdrop-blur-xl rounded-xl shadow-sm border border-gray-100 px-5 py-3">
+                        <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
+                                <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                            </div>
+                            <span className="text-sm text-gray-600">
+                                Last scan found <strong className="text-gray-900">{pages.length}</strong> pages and <strong className="text-red-600">{errorCount}</strong> broken link{errorCount !== 1 ? 's' : ''}
+                            </span>
+                        </div>
+                        <button
+                            onClick={handleStartScan}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition-colors"
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            Re-scan Site
+                        </button>
                     </div>
                 )}
 
