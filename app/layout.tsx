@@ -12,6 +12,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "AutoRankr AI – AI SEO Automation Platform",
   description: "AutoRankr AI is an AI-powered SEO platform that helps you optimize your website for search engines.",
+
 };
 
 export default function RootLayout({
