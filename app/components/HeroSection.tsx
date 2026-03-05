@@ -62,7 +62,7 @@ const HeroSection = () => {
             <div className="absolute inset-0 bg-[linear-gradient(to_right,#8882_1px,transparent_1px),linear-gradient(to_bottom,#8882_1px,transparent_1px)] bg-[size:14px_24px]"></div>
 
             <div className="max-w-6xl mx-auto px-6 pt-24 relative z-10 w-full">
-                <div className="max-w-4xl mx-auto text-center flex flex-col items-center">
+                <div className="w-full mx-auto text-center flex flex-col items-center">
 
                     {/* Badge */}
                     <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-sm border border-blue-100 rounded-full text-sm font-medium text-blue-700 mb-8 shadow-sm">
@@ -79,14 +79,14 @@ const HeroSection = () => {
                     </h1>
 
                     {/* Description */}
-                    <p className="mt-6 text-xl text-gray-600 leading-relaxed max-w-2xl mx-auto">
+                    <p className="mt-6 text-xl text-gray-600 leading-relaxed w-full max-w-3xl mx-auto">
                         Detect 404 errors on your WordPress site, get AI-powered redirect
                         suggestions, and improve SEO performance — without slowing down
                         your website.
                     </p>
 
                     {/* Inline Scan Form / CTA */}
-                    <div className="mt-10">
+                    <div className="mt-10 w-full">
                         {!isInitializing && isAuthenticated ? (
                             <div className="flex flex-wrap items-center justify-center gap-4">
                                 <Link
@@ -107,7 +107,7 @@ const HeroSection = () => {
                             </div>
                         ) : (
                             <div className="w-full max-w-3xl mx-auto">
-                                <form onSubmit={handleScanSubmit} className="flex flex-col sm:flex-row items-center gap-2 p-2 bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-gray-100 transition-all hover:shadow-2xl hover:shadow-blue-900/10 mb-4 focus-within:ring-4 focus-within:ring-blue-500/10 focus-within:border-blue-400">
+                                <form onSubmit={handleScanSubmit} className="w-full flex flex-col sm:flex-row items-center gap-2 p-2 bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-gray-100 transition-all hover:shadow-2xl hover:shadow-blue-900/10 mb-4 focus-within:ring-4 focus-within:ring-blue-500/10 focus-within:border-blue-400">
                                     <div className="relative flex-grow w-full">
                                         <div className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500">
                                             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
