@@ -12,3 +12,6 @@ export { startScan, getScanStatus, getScanErrors, cancelScan, getAllActiveScans,
 export type { StartScanRequest, StartScanResponse, ScanStatusResponse, ScanError, GetScanErrorsResponse, ActiveScan, GetActiveScansResponse, PauseScanResponse, ResumeScanResponse } from "./scan";
 export { generateRedirects, getRedirectSuggestions, selectRedirectOption, applyRedirects, rejectSuggestion, approveRedirect, undoRedirect } from "./redirects";
 export type { RedirectSuggestion, GenerateRedirectsResponse, GetSuggestionsResponse, SelectRedirectResponse, ApplyRedirectsResponse } from "./redirects";
+
+export { checkSitemapPlugins, generateSitemapSuggestion, getSitemapSuggestions, updateSitemapStatus } from "./sitemap";
+export type { SitemapSuggestion, CheckSitemapPluginsResponse, GenerateSitemapSuggestionResponse, GetSitemapSuggestionsResponse, UpdateSitemapStatusResponse } from "./sitemap";

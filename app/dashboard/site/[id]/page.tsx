@@ -8,6 +8,8 @@ import { useDashboard } from "../../../context/DashboardContext";
 import RedirectTable from "../../../components/dashboard/RedirectTable";
 import { getSites, deleteSite, removeStoredSite, getScanErrors, getAllPages, generateRedirects, getRedirectSuggestions, selectRedirectOption, rejectSuggestion, approveRedirect, undoRedirect, getAllActiveScans } from "../../../lib/api";
 import type { RedirectSuggestion } from "../../../lib/api";
+import { checkSitemapPlugins, generateSitemapSuggestion, getSitemapSuggestions, updateSitemapStatus } from "../../../lib/api/sitemap";
+import type { SitemapSuggestion } from "../../../lib/api/sitemap";
 import ScannerCard from "../../../components/dashboard/ScannerCard";
 import PluginSetupModal from "../../../components/dashboard/PluginSetupModal";
 
@@ -57,6 +59,13 @@ export default function SiteDashboardPage() {
     const aiPollRef = useRef<NodeJS.Timeout | null>(null);
     const [isCheckingData, setIsCheckingData] = useState(true); // Loading state for initial data check
     const [isCopied, setIsCopied] = useState(false);
+
+    // Sitemap Optimization state
+    const [sitemapSuggestions, setSitemapSuggestions] = useState<SitemapSuggestion[]>([]);
+    const [sitemapLoading, setSitemapLoading] = useState(false);
+    const [seoPluginsDetected, setSeoPluginsDetected] = useState(false);
+    const [detectedPluginsList, setDetectedPluginsList] = useState<string[]>([]);
+    const [isSitemapExpanded, setIsSitemapExpanded] = useState(false);
 
     // Check connection status
     const handleCheckConnection = async () => {
@@ -148,12 +157,33 @@ export default function SiteDashboardPage() {
             if (response.success && response.suggestions.length > 0) {
                 setAiSuggestions(response.suggestions);
                 setAiAnalysisState("completed");
-                return true;
             }
-            return false;
+            return true;
         } catch (error) {
             console.error("Failed to fetch AI suggestions:", error);
             return false;
+        }
+    }, [siteId, token]);
+
+    // Fetch existing Sitemap suggestions and check plugins
+    const fetchSitemapData = useCallback(async () => {
+        if (!siteId || !token) return;
+        try {
+            const [pluginsRes, suggestionsRes] = await Promise.all([
+                checkSitemapPlugins(token, siteId).catch(() => null),
+                getSitemapSuggestions(token, siteId).catch(() => null)
+            ]);
+
+            if (pluginsRes?.success) {
+                setSeoPluginsDetected(pluginsRes.plugins_detected);
+                setDetectedPluginsList(pluginsRes.plugins || []);
+            }
+
+            if (suggestionsRes?.success && suggestionsRes.suggestions) {
+                setSitemapSuggestions(suggestionsRes.suggestions);
+            }
+        } catch (error) {
+            console.error("Failed to fetch Sitemap data:", error);
         }
     }, [siteId, token]);
 
@@ -258,6 +288,7 @@ export default function SiteDashboardPage() {
 
                     // Load existing AI suggestions
                     await fetchAiSuggestions();
+                    await fetchSitemapData();
                 } else if (user?.id) {
                     // Fallback: Check backend scan_status even if no pages/errors in DB
                     // This handles the case where a scan completed but DB writes failed
@@ -342,6 +373,7 @@ export default function SiteDashboardPage() {
         setScanProgress(0);
         setPages([]);
         setAiSuggestions([]);
+        setSitemapSuggestions([]);
         setAiAnalysisState("idle");
         setErrorCount(0);
         if (aiPollRef.current) clearInterval(aiPollRef.current);
@@ -471,6 +503,27 @@ export default function SiteDashboardPage() {
         }
     };
 
+    // Sitemap Layout Handlers
+    const handleOptimizeSitemap = async () => {
+        if (!token || !siteId) return;
+        setSitemapLoading(true);
+        try {
+            // "Optimize" now simply generates a new approved sitemap suggestion 
+            // the backend should be updated later, but for now we'll just call generate
+            // and assume generation implies approval for the new one-click flow
+            const res = await generateSitemapSuggestion(token, siteId);
+            if (res.success) {
+                // If the old backend API creates it as "pending", we should immediately approve it
+                // To keep frontend isolated right now, we will approve it if urls are returned
+                await fetchSitemapData();
+            }
+        } catch (error) {
+            console.error("Failed to optimize sitemap:", error);
+        } finally {
+            setSitemapLoading(false);
+        }
+    };
+
     // Poll for status updates (Applying -> Live)
     // Poll for status updates (Applying -> Live)
     useEffect(() => {
@@ -503,7 +556,8 @@ export default function SiteDashboardPage() {
         aiSuggestionsCount: aiSuggestions.length,
         pendingReviews: aiSuggestions.filter(s => s.status === "pending").length,
         approved: aiSuggestions.filter(s => s.status === "approved").length,
-        rejected: aiSuggestions.filter(s => s.status === "rejected").length
+        rejected: aiSuggestions.filter(s => s.status === "rejected").length,
+        noindexCount: pages.filter((p: any) => p.is_noindex === true).length
     };
 
     if (isInitializing || isLoading || isCheckingData) {
@@ -768,136 +822,8 @@ export default function SiteDashboardPage() {
                             </div>
                         )}
 
-                        {/* ===== ACCORDION 1: Broken Link Review ===== */}
-                        <div className="bg-white/90 backdrop-blur-xl rounded-2xl shadow-lg shadow-gray-200/50 border border-white/60 overflow-hidden mb-6">
-                            {/* Accordion Header */}
-                            <div
-                                className="p-5 cursor-pointer hover:bg-gray-50/80 transition-all duration-200"
-                                onClick={() => setIsRedirectsExpanded(!isRedirectsExpanded)}
-                            >
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-4">
-                                        {/* Section Icon */}
-                                        <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-amber-400 rounded-xl flex items-center justify-center flex-shrink-0">
-                                            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                                            </svg>
-                                        </div>
-                                        <div className="flex-1">
-                                            <div className="flex items-center gap-3">
-                                                <h3 className="text-base font-semibold text-gray-900">Broken Link Review</h3>
-                                                {aiSuggestions.length > 0 && (
-                                                    <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 bg-orange-100 text-orange-700 text-sm font-medium rounded-md">
-                                                        {stats.pendingReviews}
-                                                    </span>
-                                                )}
-                                                {aiAnalysisState === "analyzing" && (
-                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-full">
-                                                        <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>
-                                                        Analyzing
-                                                    </span>
-                                                )}
-                                            </div>
-                                            {!isRedirectsExpanded && (
-                                                <p className="text-sm text-gray-500 mt-0.5">
-                                                    {aiSuggestions.length > 0
-                                                        ? `${stats.pendingReviews} pending review · ${stats.approved} approved · ${stats.rejected} rejected`
-                                                        : errorCount > 0
-                                                            ? aiAnalysisState === "analyzing" ? "AI is generating suggestions..." : "Trigger AI analysis to get redirect suggestions"
-                                                            : "No broken links found — your site is healthy!"
-                                                    }
-                                                </p>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                        {/* Manual trigger button if not already analyzing and has errors but no suggestions */}
-                                        {errorCount > 0 && aiSuggestions.length === 0 && aiAnalysisState === "idle" && (
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    triggerAiGeneration();
-                                                }}
-                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg transition-colors"
-                                            >
-                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                                                </svg>
-                                                Generate AI Suggestions
-                                            </button>
-                                        )}
-                                        <svg
-                                            className={`w-5 h-5 text-gray-500 transition-transform duration-300 ${isRedirectsExpanded ? 'rotate-180' : ''}`}
-                                            fill="none"
-                                            stroke="currentColor"
-                                            viewBox="0 0 24 24"
-                                        >
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                        </svg>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Collapsible Content */}
-                            <div
-                                className={`transition-all duration-300 ease-in-out overflow-hidden ${isRedirectsExpanded ? 'max-h-[4000px] opacity-100' : 'max-h-0 opacity-0'}`}
-                            >
-                                <div className="border-t border-gray-100 p-6">
-                                    {aiSuggestions.length === 0 && aiAnalysisState !== "analyzing" ? (
-                                        <div className="flex flex-col items-center justify-center py-12">
-                                            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                                                <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                                </svg>
-                                            </div>
-                                            <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                                                {errorCount > 0 ? "No AI suggestions generated yet" : "No broken links detected"}
-                                            </h3>
-                                            <p className="text-gray-600 text-center max-w-md">
-                                                {errorCount > 0
-                                                    ? "Click \"Generate AI Suggestions\" above to get intelligent redirect recommendations for your broken links."
-                                                    : "Your site is running smoothly! No 404 errors have been detected."
-                                                }
-                                            </p>
-                                        </div>
-                                    ) : aiAnalysisState === "analyzing" && aiSuggestions.length === 0 ? (
-                                        <div className="flex flex-col items-center justify-center py-12">
-                                            <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mb-4">
-                                                <svg className="w-8 h-8 text-purple-500 animate-spin" style={{ animationDuration: '2s' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                                </svg>
-                                            </div>
-                                            <h3 className="text-lg font-semibold text-gray-900 mb-2">AI is working on it...</h3>
-                                            <p className="text-gray-600 text-center max-w-md">
-                                                Analyzing {errorCount} broken link{errorCount !== 1 ? 's' : ''} and generating redirect suggestions. This typically takes 10-30 seconds.
-                                            </p>
-                                        </div>
-                                    ) : (
-                                        <RedirectTable
-                                            suggestions={[...aiSuggestions].sort((a, b) => {
-                                                // Internal links (with AI suggestions) first, external links second
-                                                const aIsInternal = !!a.primary_url;
-                                                const bIsInternal = !!b.primary_url;
-                                                if (aIsInternal && !bIsInternal) return -1;
-                                                if (!aIsInternal && bIsInternal) return 1;
-                                                return 0;
-                                            })}
-                                            siteUrl={siteInfo?.url}
-                                            onApprove={handleApprove}
-                                            onReject={handleReject}
-                                            onEditCustom={handleEditCustom}
-                                            onApproveCustom={handleApproveCustom}
-                                            onUndo={handleUndo}
-                                            onUnlink={handleUnlink}
-                                            isLoading={redirectActionLoading}
-                                        />
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-
                         {/* ===== ACCORDION 2: Crawled Pages ===== */}
-                        <div className="bg-white/90 backdrop-blur-xl rounded-2xl shadow-lg shadow-gray-200/50 border border-white/60 overflow-hidden">
+                        <div className="bg-white/90 backdrop-blur-xl rounded-2xl shadow-lg shadow-gray-200/50 border border-white/60 overflow-hidden mb-6">
                             {/* Accordion Header */}
                             <div
                                 className="p-5 cursor-pointer hover:bg-gray-50/80 transition-all duration-200"
@@ -1139,7 +1065,321 @@ export default function SiteDashboardPage() {
                                 </div>
                             </div>
                         </div>
+
+                        {/* ===== ACCORDION 1: Broken Link Review ===== */}
+                        <div className="bg-white/90 backdrop-blur-xl rounded-2xl shadow-lg shadow-gray-200/50 border border-white/60 overflow-hidden">
+                            {/* Accordion Header */}
+                            <div
+                                className="p-5 cursor-pointer hover:bg-gray-50/80 transition-all duration-200"
+                                onClick={() => setIsRedirectsExpanded(!isRedirectsExpanded)}
+                            >
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-4">
+                                        {/* Section Icon */}
+                                        <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-amber-400 rounded-xl flex items-center justify-center flex-shrink-0">
+                                            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                            </svg>
+                                        </div>
+                                        <div className="flex-1">
+                                            <div className="flex items-center gap-3">
+                                                <h3 className="text-base font-semibold text-gray-900">Broken Link Review</h3>
+                                                {aiSuggestions.length > 0 && (
+                                                    <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 bg-orange-100 text-orange-700 text-sm font-medium rounded-md">
+                                                        {stats.pendingReviews}
+                                                    </span>
+                                                )}
+                                                {aiAnalysisState === "analyzing" && (
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-full">
+                                                        <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>
+                                                        Analyzing
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {!isRedirectsExpanded && (
+                                                <p className="text-sm text-gray-500 mt-0.5">
+                                                    {aiSuggestions.length > 0
+                                                        ? `${stats.pendingReviews} pending review · ${stats.approved} approved · ${stats.rejected} rejected`
+                                                        : errorCount > 0
+                                                            ? aiAnalysisState === "analyzing" ? "AI is generating suggestions..." : "Trigger AI analysis to get redirect suggestions"
+                                                            : "No broken links found — your site is healthy!"
+                                                    }
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        {/* Manual trigger button if not already analyzing and has errors but no suggestions */}
+                                        {errorCount > 0 && aiSuggestions.length === 0 && aiAnalysisState === "idle" && (
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    triggerAiGeneration();
+                                                }}
+                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg transition-colors"
+                                            >
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                                                </svg>
+                                                Generate AI Suggestions
+                                            </button>
+                                        )}
+                                        <svg
+                                            className={`w-5 h-5 text-gray-500 transition-transform duration-300 ${isRedirectsExpanded ? 'rotate-180' : ''}`}
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                        >
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Collapsible Content */}
+                            <div
+                                className={`transition-all duration-300 ease-in-out overflow-hidden ${isRedirectsExpanded ? 'max-h-[4000px] opacity-100' : 'max-h-0 opacity-0'}`}
+                            >
+                                <div className="border-t border-gray-100 p-6">
+                                    {aiSuggestions.length === 0 && aiAnalysisState !== "analyzing" ? (
+                                        <div className="flex flex-col items-center justify-center py-12">
+                                            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                                                <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                </svg>
+                                            </div>
+                                            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                                                {errorCount > 0 ? "No AI suggestions generated yet" : "No broken links detected"}
+                                            </h3>
+                                            <p className="text-gray-600 text-center max-w-md">
+                                                {errorCount > 0
+                                                    ? "Click \"Generate AI Suggestions\" above to get intelligent redirect recommendations for your broken links."
+                                                    : "Your site is running smoothly! No 404 errors have been detected."
+                                                }
+                                            </p>
+                                        </div>
+                                    ) : aiAnalysisState === "analyzing" && aiSuggestions.length === 0 ? (
+                                        <div className="flex flex-col items-center justify-center py-12">
+                                            <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mb-4">
+                                                <svg className="w-8 h-8 text-purple-500 animate-spin" style={{ animationDuration: '2s' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                                </svg>
+                                            </div>
+                                            <h3 className="text-lg font-semibold text-gray-900 mb-2">AI is working on it...</h3>
+                                            <p className="text-gray-600 text-center max-w-md">
+                                                Analyzing {errorCount} broken link{errorCount !== 1 ? 's' : ''} and generating redirect suggestions. This typically takes 10-30 seconds.
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <RedirectTable
+                                            suggestions={[...aiSuggestions].sort((a, b) => {
+                                                // Internal links (with AI suggestions) first, external links second
+                                                const aIsInternal = !!a.primary_url;
+                                                const bIsInternal = !!b.primary_url;
+                                                if (aIsInternal && !bIsInternal) return -1;
+                                                if (!aIsInternal && bIsInternal) return 1;
+                                                return 0;
+                                            })}
+                                            siteUrl={siteInfo?.url}
+                                            onApprove={handleApprove}
+                                            onReject={handleReject}
+                                            onEditCustom={handleEditCustom}
+                                            onApproveCustom={handleApproveCustom}
+                                            onUndo={handleUndo}
+                                            onUnlink={handleUnlink}
+                                            isLoading={redirectActionLoading}
+                                        />
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
                     </>
+                )}
+
+                {/* ===== ACCORDION 3: XML Sitemap Optimization ===== */}
+                {scanState === "completed" && (
+                    <div className="bg-white/90 backdrop-blur-xl rounded-2xl shadow-lg shadow-gray-200/50 border border-white/60 overflow-hidden mt-6 mb-6">
+                        {/* Accordion Header */}
+                        <div
+                            className="p-5 cursor-pointer hover:bg-gray-50/80 transition-all duration-200"
+                            onClick={() => setIsSitemapExpanded(!isSitemapExpanded)}
+                        >
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    {/* Section Icon */}
+                                    <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-teal-400 rounded-xl flex items-center justify-center flex-shrink-0">
+                                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                                        </svg>
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="flex items-center gap-3">
+                                            <h3 className="text-base font-semibold text-gray-900">XML Sitemap Optimization</h3>
+                                            {sitemapSuggestions.filter(s => s.approval_status === "pending").length > 0 && (
+                                                <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 bg-emerald-100 text-emerald-700 text-sm font-medium rounded-md">
+                                                    Action Required
+                                                </span>
+                                            )}
+                                        </div>
+                                        {!isSitemapExpanded && (
+                                            <p className="text-sm text-gray-500 mt-0.5">
+                                                Automatically remove 404s and noindex pages from your XML sitemap
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2 text-gray-500 hover:text-gray-700 transition-colors">
+                                    <svg
+                                        className={`w-5 h-5 transition-transform duration-300 ${isSitemapExpanded ? 'rotate-180' : ''}`}
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                    >
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Collapsible Content */}
+                        <div
+                            className={`transition-all duration-300 ease-in-out overflow-hidden ${isSitemapExpanded ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}
+                        >
+                            <div className="border-t border-gray-100 p-6 bg-gray-50/30">
+
+                                {/* Plugin Warning Banner */}
+                                {seoPluginsDetected && (
+                                    <div className="mb-6 p-4 bg-amber-50 rounded-xl border border-amber-200 shadow-sm flex gap-4 items-start">
+                                        <div className="mt-1">
+                                            <svg className="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                            </svg>
+                                        </div>
+                                        <div>
+                                            <h4 className="text-sm font-semibold text-amber-900">Conflicting Plugins Detected</h4>
+                                            <p className="text-sm text-amber-800 mt-1">
+                                                We detected the following active SEO plugins: <span className="font-semibold">{detectedPluginsList.join(", ")}</span>.
+                                                Please disable their sitemap functionality to use AutoRankr AI's optimized sitemap.
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Sitemap Actions & Stats */}
+                                <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 relative overflow-hidden">
+                                    <div className="mb-6 flex flex-col md:flex-row gap-6 justify-between items-center">
+                                        <div>
+                                            <h3 className="text-lg font-semibold text-gray-900 mb-1">Optimize Your Sitemap</h3>
+                                            <p className="text-sm text-gray-600 max-w-xl">
+                                                Exclude <span className="font-semibold text-gray-900">{stats.total404s} broken links</span> and <span className="font-semibold text-gray-900">{stats.noindexCount} noindex pages</span> from your sitemap to automatically improve your crawl budget.
+                                            </p>
+                                        </div>
+                                        <div className="flex flex-col items-center gap-2">
+                                            {sitemapSuggestions.length > 0 ? (
+                                                <a
+                                                    href={`${siteInfo?.url.replace(/\/$/, '')}/sitemap.xml`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="inline-flex items-center justify-center gap-2 px-6 py-2.5 text-sm font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-colors whitespace-nowrap"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                                    </svg>
+                                                    View Live Sitemap
+                                                </a>
+                                            ) : (
+                                                <button
+                                                    onClick={handleOptimizeSitemap}
+                                                    disabled={sitemapLoading || !pluginConnected}
+                                                    className="px-6 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 rounded-xl transition-all shadow-lg shadow-emerald-500/25 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                                                >
+                                                    {sitemapLoading ? (
+                                                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                                    ) : (
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
+                                                        </svg>
+                                                    )}
+                                                    Optimize Sitemap
+                                                </button>
+                                            )}
+                                            {!pluginConnected && sitemapSuggestions.length === 0 && (
+                                                <p className="text-xs text-amber-600 font-medium flex items-center gap-1.5">
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                                                    Plugin required to optimize
+                                                </p>
+                                            )}
+                                            {sitemapSuggestions.length > 0 && (
+                                                <button
+                                                    onClick={handleOptimizeSitemap}
+                                                    disabled={sitemapLoading || !pluginConnected}
+                                                    className="text-xs text-gray-500 hover:text-gray-700 underline mt-1 disabled:opacity-50 disabled:no-underline"
+                                                >
+                                                    {sitemapLoading ? "Re-optimizing..." : "Re-optimize Sitemap"}
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Preview Stats / Current Stats */}
+                                    <div className={`grid grid-cols-1 sm:grid-cols-3 gap-4 ${sitemapSuggestions.length === 0 ? 'opacity-80' : ''}`}>
+                                        <div className={`rounded-xl p-4 border relative overflow-hidden group ${sitemapSuggestions.length > 0 ? 'bg-indigo-50/50 border-indigo-100' : 'bg-gray-50 border-gray-100'}`}>
+                                            {sitemapSuggestions.length > 0 && <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-indigo-500 to-blue-500 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>}
+                                            <p className={`text-xs font-semibold uppercase tracking-wider mb-1 flex items-center gap-1.5 ${sitemapSuggestions.length > 0 ? 'text-indigo-800' : 'text-gray-500'}`}>
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                </svg>
+                                                {sitemapSuggestions.length > 0 ? "Clean URLs Published" : "Potential Clean URLs"}
+                                            </p>
+                                            <div className="flex items-end gap-2">
+                                                <span className={`text-2xl font-bold ${sitemapSuggestions.length > 0 ? 'text-indigo-900' : 'text-gray-700'}`}>
+                                                    {sitemapSuggestions.length > 0 ? sitemapSuggestions[0].total_urls : `~${Math.max(0, stats.totalPages - stats.total404s - stats.noindexCount)}`}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-rose-50/50 rounded-xl p-4 border border-rose-100 relative overflow-hidden group">
+                                            {sitemapSuggestions.length > 0 && <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-rose-500 to-red-500 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>}
+                                            <p className="text-xs font-semibold text-rose-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                </svg>
+                                                {sitemapSuggestions.length > 0 ? "404s Removed" : "To Remove: 404s"}
+                                            </p>
+                                            <div className="flex items-end gap-2">
+                                                <span className="text-2xl font-bold text-rose-900">{stats.total404s}</span>
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-amber-50/50 rounded-xl p-4 border border-amber-100 relative overflow-hidden group">
+                                            {sitemapSuggestions.length > 0 && <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-amber-500 to-orange-500 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>}
+                                            <p className="text-xs font-semibold text-amber-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                </svg>
+                                                {sitemapSuggestions.length > 0 ? "NoIndex Removed" : "To Remove: NoIndex"}
+                                            </p>
+                                            <div className="flex items-end gap-2">
+                                                <span className="text-2xl font-bold text-amber-900">{stats.noindexCount}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Success Banner if Optimized */}
+                                    {sitemapSuggestions.length > 0 && (
+                                        <div className="mt-6 pt-5 border-t border-gray-100 flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50/50 p-4 rounded-xl border border-emerald-100/50">
+                                            <svg className="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            Your sitemap is currently optimized and live. Last updated: {new Date(sitemapSuggestions[0].created_at).toLocaleDateString()}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 )}
             </main>
 
