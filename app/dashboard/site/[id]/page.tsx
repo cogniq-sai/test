@@ -8,8 +8,8 @@ import { useDashboard } from "../../../context/DashboardContext";
 import RedirectTable from "../../../components/dashboard/RedirectTable";
 import { getSites, deleteSite, removeStoredSite, getScanErrors, getAllPages, generateRedirects, getRedirectSuggestions, selectRedirectOption, rejectSuggestion, approveRedirect, undoRedirect, getAllActiveScans } from "../../../lib/api";
 import type { RedirectSuggestion } from "../../../lib/api";
-import { checkSitemapPlugins, generateSitemapSuggestion, getSitemapSuggestions, updateSitemapStatus } from "../../../lib/api/sitemap";
-import type { SitemapSuggestion } from "../../../lib/api/sitemap";
+import { checkSitemapPlugins, generateSitemapSuggestion, getSitemapSuggestions, updateSitemapStatus } from "../../../lib/api/sitemap-api";
+import type { SitemapSuggestion } from "../../../lib/api/sitemap-api";
 import ScannerCard from "../../../components/dashboard/ScannerCard";
 import PluginSetupModal from "../../../components/dashboard/PluginSetupModal";
 
