@@ -134,6 +134,12 @@ def health_check():
 
 
 # =====================
+# Vercel Serverless Handler
+# =====================
+from mangum import Mangum
+handler = Mangum(app)
+
+# =====================
 # Run Server
 # =====================
 if __name__ == "__main__":
