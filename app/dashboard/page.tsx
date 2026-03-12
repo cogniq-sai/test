@@ -429,64 +429,74 @@ export default function DashboardPage() {
                                                 Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, filteredAndSortedSites.length)} of {filteredAndSortedSites.length} sites
                                             </div>
 
-                                            <div className="flex items-center gap-2">
+                                            <div className="inline-flex items-center border border-gray-300 rounded-lg overflow-hidden" style={{ width: '280px' }}>
                                                 {/* Previous Button */}
                                                 <button
                                                     onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
                                                     disabled={currentPage === 1}
-                                                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${currentPage === 1
-                                                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                                        : 'bg-white text-gray-700 hover:bg-blue-50 hover:text-blue-600 border border-gray-300'
+                                                    className={`w-10 h-10 flex items-center justify-center flex-shrink-0 border-r border-gray-300 transition-colors ${currentPage === 1
+                                                        ? 'bg-gray-50 text-gray-300 cursor-not-allowed'
+                                                        : 'bg-white text-gray-600 hover:bg-gray-50'
                                                         }`}
                                                 >
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                                                     </svg>
                                                 </button>
 
-                                                {/* Page Numbers */}
-                                                <div className="flex items-center gap-1">
-                                                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => {
-                                                        // Show first page, last page, current page, and pages around current
-                                                        const showPage = pageNum === 1 ||
-                                                            pageNum === totalPages ||
-                                                            (pageNum >= currentPage - 1 && pageNum <= currentPage + 1);
+                                                {/* Page Number Slots - always exactly 5 */}
+                                                {(() => {
+                                                    const slots: (number | '...')[] = [];
 
-                                                        // Show ellipsis
-                                                        const showEllipsisBefore = pageNum === currentPage - 2 && currentPage > 3;
-                                                        const showEllipsisAfter = pageNum === currentPage + 2 && currentPage < totalPages - 2;
+                                                    if (totalPages <= 5) {
+                                                        for (let i = 1; i <= totalPages; i++) slots.push(i);
+                                                        while (slots.length < 5) slots.push(0 as any);
+                                                    } else if (currentPage <= 3) {
+                                                        slots.push(1, 2, 3, '...', totalPages);
+                                                    } else if (currentPage >= totalPages - 2) {
+                                                        slots.push(1, '...', totalPages - 2, totalPages - 1, totalPages);
+                                                    } else {
+                                                        slots.push(1, '...', currentPage, '...', totalPages);
+                                                    }
 
-                                                        if (showEllipsisBefore || showEllipsisAfter) {
-                                                            return <span key={pageNum} className="px-2 text-gray-400">...</span>;
+                                                    return slots.map((slot, idx) => {
+                                                        const isLast = idx === slots.length - 1;
+                                                        const borderRight = isLast ? 'border-r border-gray-300' : 'border-r border-gray-300';
+
+                                                        if (slot === 0) {
+                                                            return <span key={`pad-${idx}`} className={`w-10 h-10 flex-shrink-0 bg-white ${borderRight}`} />;
                                                         }
 
-                                                        if (!showPage) return null;
+                                                        if (slot === '...') {
+                                                            return <span key={`ellipsis-${idx}`} className={`w-10 h-10 flex-shrink-0 flex items-center justify-center bg-white text-gray-400 select-none ${borderRight}`}>…</span>;
+                                                        }
 
+                                                        const isActive = currentPage === slot;
                                                         return (
                                                             <button
-                                                                key={pageNum}
-                                                                onClick={() => setCurrentPage(pageNum)}
-                                                                className={`w-10 h-10 rounded-lg font-medium transition-colors ${currentPage === pageNum
-                                                                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
-                                                                    : 'bg-white text-gray-700 hover:bg-blue-50 hover:text-blue-600 border border-gray-300'
+                                                                key={`page-${slot}`}
+                                                                onClick={() => setCurrentPage(slot)}
+                                                                className={`w-10 h-10 flex-shrink-0 flex items-center justify-center font-medium text-sm transition-colors ${borderRight} ${isActive
+                                                                    ? 'bg-blue-50 text-blue-600 font-semibold'
+                                                                    : 'bg-white text-gray-700 hover:bg-gray-50'
                                                                     }`}
                                                             >
-                                                                {pageNum}
+                                                                {slot}
                                                             </button>
                                                         );
-                                                    })}
-                                                </div>
+                                                    });
+                                                })()}
 
                                                 {/* Next Button */}
                                                 <button
                                                     onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
                                                     disabled={currentPage === totalPages}
-                                                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${currentPage === totalPages
-                                                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                                        : 'bg-white text-gray-700 hover:bg-blue-50 hover:text-blue-600 border border-gray-300'
+                                                    className={`w-10 h-10 flex items-center justify-center flex-shrink-0 transition-colors ${currentPage === totalPages
+                                                        ? 'bg-gray-50 text-gray-300 cursor-not-allowed'
+                                                        : 'bg-white text-gray-600 hover:bg-gray-50'
                                                         }`}
                                                 >
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                                     </svg>
                                                 </button>

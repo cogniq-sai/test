@@ -120,20 +120,23 @@ export default function SiteCard({ site, onDelete, token }: SiteCardProps) {
     // Format relative time
     const getRelativeTime = (site: Site) => {
         // If scan is completed, show completion time
-        if (site.scanState === 'completed' && site.completedAt) {
-            const date = new Date(site.completedAt);
-            const now = new Date();
-            const diffMs = now.getTime() - date.getTime();
-            const diffMins = Math.floor(diffMs / 60000);
-            const diffHours = Math.floor(diffMs / 3600000);
-            const diffDays = Math.floor(diffMs / 86400000);
+        if (site.scanState === 'completed') {
+            if (site.completedAt) {
+                const date = new Date(site.completedAt);
+                const now = new Date();
+                const diffMs = now.getTime() - date.getTime();
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMs / 3600000);
+                const diffDays = Math.floor(diffMs / 86400000);
 
-            if (diffMins < 1) return "Completed just now";
-            if (diffMins < 60) return `Completed ${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
-            if (diffHours < 24) return `Completed ${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-            if (diffDays < 7) return `Completed ${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-            if (diffDays < 30) return `Completed ${Math.floor(diffDays / 7)} week${Math.floor(diffDays / 7) > 1 ? 's' : ''} ago`;
-            return `Completed ${Math.floor(diffDays / 30)} month${Math.floor(diffDays / 30) > 1 ? 's' : ''} ago`;
+                if (diffMins < 1) return "Completed just now";
+                if (diffMins < 60) return `Completed ${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+                if (diffHours < 24) return `Completed ${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+                if (diffDays < 7) return `Completed ${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+                if (diffDays < 30) return `Completed ${Math.floor(diffDays / 7)} week${Math.floor(diffDays / 7) > 1 ? 's' : ''} ago`;
+                return `Completed ${Math.floor(diffDays / 30)} month${Math.floor(diffDays / 30) > 1 ? 's' : ''} ago`;
+            }
+            return "Recently scanned";
         }
 
         // If scan is in progress
