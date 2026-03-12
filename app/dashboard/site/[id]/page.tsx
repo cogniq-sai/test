@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "../../../context/AuthContext";
@@ -8,8 +8,8 @@ import { useDashboard } from "../../../context/DashboardContext";
 import RedirectTable from "../../../components/dashboard/RedirectTable";
 import { getSites, deleteSite, removeStoredSite, getScanErrors, getAllPages, generateRedirects, getRedirectSuggestions, selectRedirectOption, rejectSuggestion, approveRedirect, undoRedirect, getAllActiveScans } from "../../../lib/api";
 import type { RedirectSuggestion } from "../../../lib/api";
-import { checkSitemapPlugins, generateSitemapSuggestion, getSitemapSuggestions, updateSitemapStatus } from "../../../lib/api/sitemap-api";
-import type { SitemapSuggestion } from "../../../lib/api/sitemap-api";
+import { checkSitemapPlugins, generateSitemapSuggestion, getSitemapSuggestions, updateSitemapStatus, getSitemapIssues } from "../../../lib/api/sitemap-api";
+import type { SitemapSuggestion, BrokenLinkItem, NoindexLinkItem } from "../../../lib/api/sitemap-api";
 import ScannerCard from "../../../components/dashboard/ScannerCard";
 import PluginSetupModal from "../../../components/dashboard/PluginSetupModal";
 
@@ -66,6 +66,14 @@ export default function SiteDashboardPage() {
     const [seoPluginsDetected, setSeoPluginsDetected] = useState(false);
     const [detectedPluginsList, setDetectedPluginsList] = useState<string[]>([]);
     const [isSitemapExpanded, setIsSitemapExpanded] = useState(false);
+    const [recheckingPlugins, setRecheckingPlugins] = useState(false);
+    const [sitemapIssues, setSitemapIssues] = useState<{ broken_links: BrokenLinkItem[]; noindex_links: NoindexLinkItem[] }>({
+        broken_links: [],
+        noindex_links: []
+    });
+    const [isSitemapIssuesExpanded, setIsSitemapIssuesExpanded] = useState(false);
+    const [sitemapIssuesFilter, setSitemapIssuesFilter] = useState<'all' | 'broken' | 'noindex'>('all');
+    const [sitemapIssuesPage, setSitemapIssuesPage] = useState(1);
 
     // Check connection status
     const handleCheckConnection = async () => {
@@ -165,13 +173,14 @@ export default function SiteDashboardPage() {
         }
     }, [siteId, token]);
 
-    // Fetch existing Sitemap suggestions and check plugins
+    // Fetch existing Sitemap suggestions, check plugins, and fetch issues
     const fetchSitemapData = useCallback(async () => {
         if (!siteId || !token) return;
         try {
-            const [pluginsRes, suggestionsRes] = await Promise.all([
+            const [pluginsRes, suggestionsRes, issuesRes] = await Promise.all([
                 checkSitemapPlugins(token, siteId).catch(() => null),
-                getSitemapSuggestions(token, siteId).catch(() => null)
+                getSitemapSuggestions(token, siteId).catch(() => null),
+                getSitemapIssues(token, siteId).catch(() => null)
             ]);
 
             if (pluginsRes?.success) {
@@ -181,6 +190,13 @@ export default function SiteDashboardPage() {
 
             if (suggestionsRes?.success && suggestionsRes.suggestions) {
                 setSitemapSuggestions(suggestionsRes.suggestions);
+            }
+
+            if (issuesRes?.success) {
+                setSitemapIssues({
+                    broken_links: issuesRes.broken_links || [],
+                    noindex_links: issuesRes.noindex_links || []
+                });
             }
         } catch (error) {
             console.error("Failed to fetch Sitemap data:", error);
@@ -360,6 +376,7 @@ export default function SiteDashboardPage() {
         setScanState("completed");
         const foundErrors = await fetchScanResults();
         fetchDiscoveredPages();
+        fetchSitemapData(); // Load sitemap issues/plugins after crawl
         refreshData();
 
         // Auto-trigger AI redirect generation if 404s were found
@@ -505,7 +522,7 @@ export default function SiteDashboardPage() {
 
     // Sitemap Layout Handlers
     const handleOptimizeSitemap = async () => {
-        if (!token || !siteId) return;
+        if (!token || !siteId || seoPluginsDetected) return;
         setSitemapLoading(true);
         try {
             // "Optimize" now simply generates a new approved sitemap suggestion 
@@ -521,6 +538,23 @@ export default function SiteDashboardPage() {
             console.error("Failed to optimize sitemap:", error);
         } finally {
             setSitemapLoading(false);
+        }
+    };
+
+    // Re-check if conflicting plugins have been removed
+    const handleRecheckPlugins = async () => {
+        if (!token || !siteId) return;
+        setRecheckingPlugins(true);
+        try {
+            const pluginsRes = await checkSitemapPlugins(token, siteId);
+            if (pluginsRes?.success) {
+                setSeoPluginsDetected(pluginsRes.plugins_detected);
+                setDetectedPluginsList(pluginsRes.plugins || []);
+            }
+        } catch (error) {
+            console.error("Failed to re-check plugins:", error);
+        } finally {
+            setRecheckingPlugins(false);
         }
     };
 
@@ -552,13 +586,32 @@ export default function SiteDashboardPage() {
     // Calculate stats
     const stats = {
         totalPages: pages.length,
-        total404s: errorCount,
+        total404s: sitemapIssues.broken_links.length,
         aiSuggestionsCount: aiSuggestions.length,
         pendingReviews: aiSuggestions.filter(s => s.status === "pending").length,
         approved: aiSuggestions.filter(s => s.status === "approved").length,
         rejected: aiSuggestions.filter(s => s.status === "rejected").length,
-        noindexCount: pages.filter((p: any) => p.is_noindex === true).length
+        noindexCount: sitemapIssues.noindex_links.length
     };
+
+    const combinedSitemapIssues = useMemo(() => {
+        const issues: { url: string; title?: string; type: 'broken' | 'noindex'; status_code?: number }[] = [];
+        sitemapIssues.broken_links.forEach(link => issues.push({ ...link, type: 'broken' }));
+        sitemapIssues.noindex_links.forEach(link => issues.push({ ...link, type: 'noindex' }));
+        return issues;
+    }, [sitemapIssues]);
+
+    const filteredSitemapIssues = useMemo(() => {
+        if (sitemapIssuesFilter === 'all') return combinedSitemapIssues;
+        return combinedSitemapIssues.filter(issue => issue.type === sitemapIssuesFilter);
+    }, [combinedSitemapIssues, sitemapIssuesFilter]);
+
+    const ISSUES_PER_PAGE = 10;
+    const totalIssuesPages = Math.max(1, Math.ceil(filteredSitemapIssues.length / ISSUES_PER_PAGE));
+    const paginatedSitemapIssues = useMemo(() => {
+        const start = (sitemapIssuesPage - 1) * ISSUES_PER_PAGE;
+        return filteredSitemapIssues.slice(start, start + ISSUES_PER_PAGE);
+    }, [filteredSitemapIssues, sitemapIssuesPage]);
 
     if (isInitializing || isLoading || isCheckingData) {
         return (
@@ -1215,7 +1268,7 @@ export default function SiteDashboardPage() {
                                     </div>
                                     <div className="flex-1">
                                         <div className="flex items-center gap-3">
-                                            <h3 className="text-base font-semibold text-gray-900">XML Sitemap Optimization</h3>
+                                            <h3 className="text-base font-semibold text-gray-900">Sitemap Optimization</h3>
                                             {sitemapSuggestions.filter(s => s.approval_status === "pending").length > 0 && (
                                                 <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 bg-emerald-100 text-emerald-700 text-sm font-medium rounded-md">
                                                     Action Required
@@ -1248,20 +1301,63 @@ export default function SiteDashboardPage() {
                         >
                             <div className="border-t border-gray-100 p-6 bg-gray-50/30">
 
-                                {/* Plugin Warning Banner */}
                                 {seoPluginsDetected && (
-                                    <div className="mb-6 p-4 bg-amber-50 rounded-xl border border-amber-200 shadow-sm flex gap-4 items-start">
-                                        <div className="mt-1">
-                                            <svg className="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                            </svg>
+                                    /* ===== CONFLICT NOTICE ===== */
+                                    <div className="bg-white rounded-xl border border-amber-200 shadow-sm overflow-hidden mb-6">
+                                        <div className="bg-amber-50 border-b border-amber-200 px-6 py-4 flex items-center gap-3">
+                                            <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                                                <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                </svg>
+                                            </div>
+                                            <div>
+                                                <h3 className="text-base font-semibold text-amber-900">Sitemap Plugin Conflict Detected</h3>
+                                                <p className="text-xs text-amber-700 mt-0.5">Sitemap optimization is currently unavailable</p>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <h4 className="text-sm font-semibold text-amber-900">Conflicting Plugins Detected</h4>
-                                            <p className="text-sm text-amber-800 mt-1">
-                                                We detected the following active SEO plugins: <span className="font-semibold">{detectedPluginsList.join(", ")}</span>.
-                                                Please disable their sitemap functionality to use AutoRankr AI's optimized sitemap.
-                                            </p>
+                                        <div className="p-5">
+                                            <div className="flex flex-wrap items-center gap-2 mb-3">
+                                                <p className="text-sm text-gray-700">
+                                                    We detected that your site already has {detectedPluginsList.length > 1 ? 'the following plugins controlling your sitemap' : 'a plugin controlling your sitemap'}:
+                                                </p>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {detectedPluginsList.map((plugin, i) => (
+                                                        <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 border border-amber-200 rounded-lg text-sm font-medium text-amber-800">
+                                                            <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                                            </svg>
+                                                            {plugin}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                                                <h4 className="text-sm font-semibold text-gray-900 mb-1.5">How to resolve this:</h4>
+                                                <ol className="text-sm text-gray-600 space-y-1 list-decimal list-inside">
+                                                    <li>Go to your WordPress admin dashboard</li>
+                                                    <li>Navigate to <strong>Plugins</strong></li>
+                                                    <li>Disable or delete <strong>{detectedPluginsList.join(", ")}</strong></li>
+                                                </ol>
+                                            </div>
+                                            <div className="mt-4 flex items-center gap-3">
+                                                <button
+                                                    onClick={handleRecheckPlugins}
+                                                    disabled={recheckingPlugins}
+                                                    className="inline-flex justify-center items-center gap-2 min-w-[160px] px-4 py-2 text-sm font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-colors disabled:opacity-60"
+                                                >
+                                                    {recheckingPlugins ? (
+                                                        <div className="w-4 h-4 border-2 border-amber-300 border-t-amber-600 rounded-full animate-spin"></div>
+                                                    ) : (
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                                        </svg>
+                                                    )}
+                                                    {recheckingPlugins ? 'Checking...' : 'Re-check Plugins'}
+                                                </button>
+                                                <p className="text-xs text-gray-500">
+                                                    Click after removing the plugin to verify
+                                                </p>
+                                            </div>
                                         </div>
                                     </div>
                                 )}
@@ -1291,8 +1387,12 @@ export default function SiteDashboardPage() {
                                             ) : (
                                                 <button
                                                     onClick={handleOptimizeSitemap}
-                                                    disabled={sitemapLoading || !pluginConnected}
-                                                    className="px-6 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 rounded-xl transition-all shadow-lg shadow-emerald-500/25 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                                                    disabled={sitemapLoading || !pluginConnected || seoPluginsDetected}
+                                                    className={`px-6 py-2.5 text-sm font-medium text-white rounded-xl transition-all shadow-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap ${
+                                                        seoPluginsDetected
+                                                            ? 'bg-gray-400 shadow-none cursor-not-allowed'
+                                                            : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 shadow-emerald-500/25'
+                                                    }`}
                                                 >
                                                     {sitemapLoading ? (
                                                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
@@ -1313,7 +1413,7 @@ export default function SiteDashboardPage() {
                                             {sitemapSuggestions.length > 0 && (
                                                 <button
                                                     onClick={handleOptimizeSitemap}
-                                                    disabled={sitemapLoading || !pluginConnected}
+                                                    disabled={sitemapLoading || !pluginConnected || seoPluginsDetected}
                                                     className="text-xs text-gray-500 hover:text-gray-700 underline mt-1 disabled:opacity-50 disabled:no-underline"
                                                 >
                                                     {sitemapLoading ? "Re-optimizing..." : "Re-optimize Sitemap"}
@@ -1376,7 +1476,229 @@ export default function SiteDashboardPage() {
                                             Your sitemap is currently optimized and live. Last updated: {new Date(sitemapSuggestions[0].created_at).toLocaleDateString()}
                                         </div>
                                     )}
+
+                                    {!seoPluginsDetected && (
+                                    <div className="mt-8 border border-gray-100 rounded-xl overflow-hidden bg-white">
+                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 border-b border-gray-100 bg-gray-50/50">
+                                            <div className="flex items-center gap-2.5">
+                                                <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                                                    <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                    </svg>
+                                                </div>
+                                                <div>
+                                                    <h3 className="text-sm font-semibold text-gray-900">Detected Issues</h3>
+                                                    <p className="text-xs text-gray-500">Broken links and noindex pages detected</p>
+                                                </div>
+                                            </div>
+
+                                            {combinedSitemapIssues.length > 0 && (
+                                                <div className="flex bg-gray-100/80 p-1 rounded-lg">
+                                                    <button
+                                                        onClick={() => { setSitemapIssuesFilter('all'); setSitemapIssuesPage(1); }}
+                                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${sitemapIssuesFilter === 'all' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                                                    >
+                                                        All Issues
+                                                    </button>
+                                                    <button
+                                                        onClick={() => { setSitemapIssuesFilter('broken'); setSitemapIssuesPage(1); }}
+                                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${sitemapIssuesFilter === 'broken' ? 'bg-white text-rose-700 shadow-sm border border-rose-100' : 'text-gray-500 hover:text-gray-700'}`}
+                                                    >
+                                                        Broken Links
+                                                    </button>
+                                                    <button
+                                                        onClick={() => { setSitemapIssuesFilter('noindex'); setSitemapIssuesPage(1); }}
+                                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${sitemapIssuesFilter === 'noindex' ? 'bg-white text-amber-700 shadow-sm border border-amber-100' : 'text-gray-500 hover:text-gray-700'}`}
+                                                    >
+                                                        NoIndex Pages
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {combinedSitemapIssues.length === 0 ? (
+                                            <div className="p-8 text-center bg-white">
+                                                <div className="w-12 h-12 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-3">
+                                                    <svg className="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                    </svg>
+                                                </div>
+                                                <p className="text-sm font-medium text-gray-900 mb-1">No issues detected</p>
+                                                <p className="text-xs text-gray-500">Your crawled pages are all valid and indexable.</p>
+                                            </div>
+                                        ) : (
+                                            <div>
+                                                <table className="w-full text-left border-collapse">
+                                                    <thead className="bg-gray-50/80">
+                                                        <tr>
+                                                            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-16">Sr No</th>
+                                                            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-24">Type</th>
+                                                            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-48">Page Title</th>
+                                                            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-24">Status</th>
+                                                            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">URL Path</th>
+                                                            <th className="px-6 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider w-24">Action</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-gray-100 bg-white">
+                                                        {filteredSitemapIssues.length === 0 ? (
+                                                            <tr>
+                                                                <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-500">
+                                                                    No URLs match the selected filter.
+                                                                </td>
+                                                            </tr>
+                                                        ) : (
+                                                            paginatedSitemapIssues.map((item, idx) => {
+                                                                const urlPath = item.url.replace(/^https?:\/\/[^\/]+/, '') || '/';
+                                                                return (
+                                                                    <tr key={idx} className="hover:bg-gray-50/50 transition-colors group">
+                                                                        <td className="px-6 py-4 text-sm text-gray-500 font-medium">
+                                                                            {(sitemapIssuesPage - 1) * ISSUES_PER_PAGE + idx + 1}
+                                                                        </td>
+                                                                        <td className="px-6 py-4">
+                                                                            {item.type === 'broken' ? (
+                                                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                                                                                    Broken
+                                                                                </span>
+                                                                            ) : (
+                                                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">
+                                                                                    NoIndex
+                                                                                </span>
+                                                                            )}
+                                                                        </td>
+                                                                        <td className="px-6 py-4">
+                                                                            <span className="text-sm text-gray-600 truncate max-w-[200px] block" title={item.title || '—'}>
+                                                                                {item.title || '—'}
+                                                                            </span>
+                                                                        </td>
+                                                                        <td className="px-6 py-4">
+                                                                            {item.status_code ? (
+                                                                                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${item.status_code >= 400 ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                                                                                    {item.status_code}
+                                                                                </span>
+                                                                            ) : (
+                                                                                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                                                                                    200
+                                                                                </span>
+                                                                            )}
+                                                                        </td>
+                                                                        <td className="px-6 py-4">
+                                                                            <div className="flex items-center gap-3">
+                                                                                <span className="text-sm font-medium text-gray-900 truncate max-w-[300px]" title={item.url}>
+                                                                                    {item.url}
+                                                                                </span>
+                                                                            </div>
+                                                                        </td>
+                                                                        <td className="px-6 py-4 text-right">
+                                                                            <a
+                                                                                href={item.url}
+                                                                                target="_blank"
+                                                                                rel="noopener noreferrer"
+                                                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                                                                                onClick={(e) => e.stopPropagation()}
+                                                                            >
+                                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                                                                </svg>
+                                                                                Visit
+                                                                            </a>
+                                                                        </td>
+                                                                    </tr>
+                                                                );
+                                                            })
+                                                        )}
+                                                    </tbody>
+                                                </table>
+
+                                                {/* Pagination Controls */}
+                                                {filteredSitemapIssues.length > ISSUES_PER_PAGE && (
+                                                    <div className="border-t border-gray-100 px-6 py-4 flex items-center justify-between">
+                                                        <div className="flex-1 flex justify-between sm:hidden">
+                                                            <button
+                                                                onClick={() => setSitemapIssuesPage(prev => Math.max(prev - 1, 1))}
+                                                                disabled={sitemapIssuesPage === 1}
+                                                                className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            >
+                                                                Previous
+                                                            </button>
+                                                            <button
+                                                                onClick={() => setSitemapIssuesPage(prev => Math.min(prev + 1, totalIssuesPages))}
+                                                                disabled={sitemapIssuesPage === totalIssuesPages}
+                                                                className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            >
+                                                                Next
+                                                            </button>
+                                                        </div>
+                                                        <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                                                            <div>
+                                                                <p className="text-sm text-gray-700">
+                                                                    Showing <span className="font-medium">{(sitemapIssuesPage - 1) * ISSUES_PER_PAGE + 1}</span> to <span className="font-medium">{Math.min(sitemapIssuesPage * ISSUES_PER_PAGE, filteredSitemapIssues.length)}</span> of <span className="font-medium">{filteredSitemapIssues.length}</span> results
+                                                                </p>
+                                                            </div>
+                                                            <div>
+                                                                <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                                                                    <button
+                                                                        onClick={() => setSitemapIssuesPage(prev => Math.max(prev - 1, 1))}
+                                                                        disabled={sitemapIssuesPage === 1}
+                                                                        className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                    >
+                                                                        <span className="sr-only">Previous</span>
+                                                                        <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                                            <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                                        </svg>
+                                                                    </button>
+                                                                    {/* Page Numbers */}
+                                                                    {[...Array(totalIssuesPages)].map((_, i) => {
+                                                                        const pageNum = i + 1;
+                                                                        if (
+                                                                            pageNum === 1 ||
+                                                                            pageNum === totalIssuesPages ||
+                                                                            (pageNum >= sitemapIssuesPage - 1 && pageNum <= sitemapIssuesPage + 1)
+                                                                        ) {
+                                                                            return (
+                                                                                <button
+                                                                                    key={pageNum}
+                                                                                    onClick={() => setSitemapIssuesPage(pageNum)}
+                                                                                    className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${sitemapIssuesPage === pageNum
+                                                                                        ? 'z-10 bg-blue-50 border-blue-500 text-blue-600'
+                                                                                        : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
+                                                                                        }`}
+                                                                                >
+                                                                                    {pageNum}
+                                                                                </button>
+                                                                            );
+                                                                        } else if (
+                                                                            pageNum === sitemapIssuesPage - 2 ||
+                                                                            pageNum === sitemapIssuesPage + 2
+                                                                        ) {
+                                                                            return (
+                                                                                <span key={pageNum} className="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700">
+                                                                                    ...
+                                                                                </span>
+                                                                            );
+                                                                        }
+                                                                        return null;
+                                                                    })}
+                                                                    <button
+                                                                        onClick={() => setSitemapIssuesPage(prev => Math.min(prev + 1, totalIssuesPages))}
+                                                                        disabled={sitemapIssuesPage === totalIssuesPages}
+                                                                        className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                    >
+                                                                        <span className="sr-only">Next</span>
+                                                                        <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                                            <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                                                                        </svg>
+                                                                    </button>
+                                                                </nav>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                    )}
                                 </div>
+
                             </div>
                         </div>
                     </div>

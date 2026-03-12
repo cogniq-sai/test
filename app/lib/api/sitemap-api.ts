@@ -8,6 +8,24 @@ export interface SitemapSuggestion {
     reviewed_at: string | null;
 }
 
+export interface BrokenLinkItem {
+    url: string;
+    title?: string;
+    status_code: number;
+}
+
+export interface NoindexLinkItem {
+    url: string;
+    title?: string;
+}
+
+export interface SitemapIssuesResponse {
+    success: boolean;
+    broken_links: BrokenLinkItem[];
+    noindex_links: NoindexLinkItem[];
+    error?: string;
+}
+
 export interface GetSitemapSuggestionsResponse {
     success: boolean;
     suggestions: SitemapSuggestion[];
@@ -77,5 +95,13 @@ export async function updateSitemapStatus(
         method: "POST",
         body: JSON.stringify({ action, siteId })
     });
+    return data;
+}
+
+/**
+ * Get broken links and noindex pages found in the crawl (for sitemap exclusion display)
+ */
+export async function getSitemapIssues(token: string, siteId: string): Promise<SitemapIssuesResponse> {
+    const data = await authRequest<SitemapIssuesResponse>(`/sitemap/issues?siteId=${siteId}`, token);
     return data;
 }
