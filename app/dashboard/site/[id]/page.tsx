@@ -8,8 +8,8 @@ import { useDashboard } from "../../../context/DashboardContext";
 import RedirectTable from "../../../components/dashboard/RedirectTable";
 import { getSites, deleteSite, removeStoredSite, getScanErrors, getAllPages, generateRedirects, getRedirectSuggestions, selectRedirectOption, rejectSuggestion, approveRedirect, undoRedirect, getAllActiveScans } from "../../../lib/api";
 import type { RedirectSuggestion } from "../../../lib/api";
-import { checkSitemapPlugins, generateSitemapSuggestion, getSitemapSuggestions, updateSitemapStatus, getSitemapIssues } from "../../../lib/api/sitemap-api";
-import type { SitemapSuggestion, BrokenLinkItem, NoindexLinkItem } from "../../../lib/api/sitemap-api";
+import { checkSitemapPlugins, generateSitemapSuggestion, getSitemapSuggestions, updateSitemapStatus, getSitemapIssues, undoSitemapOptimization, debugSitemapAdd } from "../../../lib/api/sitemap-api";
+import type { SitemapSuggestion, BrokenLinkItem, NoindexLinkItem, MissingLinkItem } from "../../../lib/api/sitemap-api";
 import ScannerCard from "../../../components/dashboard/ScannerCard";
 import PluginSetupModal from "../../../components/dashboard/PluginSetupModal";
 
@@ -63,17 +63,24 @@ export default function SiteDashboardPage() {
     // Sitemap Optimization state
     const [sitemapSuggestions, setSitemapSuggestions] = useState<SitemapSuggestion[]>([]);
     const [sitemapLoading, setSitemapLoading] = useState(false);
+    const [undoLoading, setUndoLoading] = useState(false);
     const [seoPluginsDetected, setSeoPluginsDetected] = useState(false);
     const [detectedPluginsList, setDetectedPluginsList] = useState<string[]>([]);
     const [isSitemapExpanded, setIsSitemapExpanded] = useState(false);
     const [recheckingPlugins, setRecheckingPlugins] = useState(false);
-    const [sitemapIssues, setSitemapIssues] = useState<{ broken_links: BrokenLinkItem[]; noindex_links: NoindexLinkItem[] }>({
+    const [sitemapIssues, setSitemapIssues] = useState<{ 
+        broken_links: BrokenLinkItem[]; 
+        noindex_links: NoindexLinkItem[];
+        missing_links: MissingLinkItem[];
+    }>({
         broken_links: [],
-        noindex_links: []
+        noindex_links: [],
+        missing_links: []
     });
     const [isSitemapIssuesExpanded, setIsSitemapIssuesExpanded] = useState(false);
-    const [sitemapIssuesFilter, setSitemapIssuesFilter] = useState<'all' | 'broken' | 'noindex'>('all');
+    const [sitemapIssuesFilter, setSitemapIssuesFilter] = useState<'all' | 'broken' | 'noindex' | 'missing'>('all');
     const [sitemapIssuesPage, setSitemapIssuesPage] = useState(1);
+    const [debugUrl, setDebugUrl] = useState('');
 
     // Check connection status
     const handleCheckConnection = async () => {
@@ -195,7 +202,8 @@ export default function SiteDashboardPage() {
             if (issuesRes?.success) {
                 setSitemapIssues({
                     broken_links: issuesRes.broken_links || [],
-                    noindex_links: issuesRes.noindex_links || []
+                    noindex_links: issuesRes.noindex_links || [],
+                    missing_links: issuesRes.missing_links || []
                 });
             }
         } catch (error) {
@@ -522,20 +530,55 @@ export default function SiteDashboardPage() {
 
     // Sitemap Layout Handlers
     const handleOptimizeSitemap = async () => {
-        if (!token || !siteId || seoPluginsDetected) return;
+        if (!token || !siteId) return;
         setSitemapLoading(true);
         try {
-            // "Optimize" now simply generates a new approved sitemap suggestion 
-            // the backend should be updated later, but for now we'll just call generate
-            // and assume generation implies approval for the new one-click flow
             const res = await generateSitemapSuggestion(token, siteId);
             if (res.success) {
-                // If the old backend API creates it as "pending", we should immediately approve it
-                // To keep frontend isolated right now, we will approve it if urls are returned
+                // Now we immediately approve the suggestion if it's a one-click flow
+                // Get all suggestions and find the newest pending one
+                const suggestionsRes = await getSitemapSuggestions(token, siteId);
+                if (suggestionsRes.success && suggestionsRes.suggestions.length > 0) {
+                    const latest = suggestionsRes.suggestions[0];
+                    if (latest.approval_status === 'pending') {
+                        await updateSitemapStatus(token, siteId, latest.id, 'approve');
+                    }
+                }
                 await fetchSitemapData();
             }
         } catch (error) {
             console.error("Failed to optimize sitemap:", error);
+        } finally {
+            setSitemapLoading(false);
+        }
+    };
+
+    const handleUndoSitemap = async () => {
+        if (!token || !siteId || undoLoading) return;
+        setUndoLoading(true);
+        try {
+            const res = await undoSitemapOptimization(token, siteId);
+            if (res.success) {
+                await fetchSitemapData();
+            }
+        } catch (error) {
+            console.error("Failed to undo sitemap optimization:", error);
+        } finally {
+            setUndoLoading(false);
+        }
+    };
+
+    const handleDebugAdd = async (url: string) => {
+        if (!token || !siteId || sitemapLoading) return;
+        setSitemapLoading(true);
+        try {
+            const res = await debugSitemapAdd(token, siteId, url);
+            if (res.success) {
+                setDebugUrl("");
+                await fetchSitemapData();
+            }
+        } catch (error) {
+            console.error("Failed to add debug url to sitemap:", error);
         } finally {
             setSitemapLoading(false);
         }
@@ -591,13 +634,15 @@ export default function SiteDashboardPage() {
         pendingReviews: aiSuggestions.filter(s => s.status === "pending").length,
         approved: aiSuggestions.filter(s => s.status === "approved").length,
         rejected: aiSuggestions.filter(s => s.status === "rejected").length,
-        noindexCount: sitemapIssues.noindex_links.length
+        noindexCount: sitemapIssues.noindex_links.length,
+        missingCount: sitemapIssues.missing_links.length
     };
 
     const combinedSitemapIssues = useMemo(() => {
-        const issues: { url: string; title?: string; type: 'broken' | 'noindex'; status_code?: number }[] = [];
+        const issues: { url: string; title?: string; type: 'broken' | 'noindex' | 'missing'; status_code?: number }[] = [];
         sitemapIssues.broken_links.forEach(link => issues.push({ ...link, type: 'broken' }));
         sitemapIssues.noindex_links.forEach(link => issues.push({ ...link, type: 'noindex' }));
+        sitemapIssues.missing_links.forEach(link => issues.push({ ...link, type: 'missing' }));
         return issues;
     }, [sitemapIssues]);
 
@@ -1321,62 +1366,38 @@ export default function SiteDashboardPage() {
                             <div className="border-t border-gray-100 p-6 bg-gray-50/30">
 
                                 {seoPluginsDetected && (
-                                    /* ===== CONFLICT NOTICE ===== */
-                                    <div className="bg-white rounded-xl border border-amber-200 shadow-sm overflow-hidden mb-6">
-                                        <div className="bg-amber-50 border-b border-amber-200 px-6 py-4 flex items-center gap-3">
-                                            <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                                                <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    /* ===== COMPATIBILITY NOTICE ===== */
+                                    <div className="bg-white rounded-xl border border-blue-100 shadow-sm overflow-hidden mb-6">
+                                        <div className="bg-blue-50/50 border-b border-blue-100 px-6 py-4 flex items-center gap-3">
+                                            <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                                                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                                                 </svg>
                                             </div>
                                             <div>
-                                                <h3 className="text-base font-semibold text-amber-900">Sitemap Plugin Conflict Detected</h3>
-                                                <p className="text-xs text-amber-700 mt-0.5">Sitemap optimization is currently unavailable</p>
+                                                <h3 className="text-base font-semibold text-blue-900">Seamless Integration Active</h3>
+                                                <p className="text-xs text-blue-700 mt-0.5">Works alongside your existing SEO plugins</p>
                                             </div>
                                         </div>
                                         <div className="p-5">
-                                            <div className="flex flex-wrap items-center gap-2 mb-3">
+                                            <div className="flex flex-wrap items-center gap-2 mb-1">
                                                 <p className="text-sm text-gray-700">
-                                                    We detected that your site already has {detectedPluginsList.length > 1 ? 'the following plugins controlling your sitemap' : 'a plugin controlling your sitemap'}:
+                                                    We automatically integrate with and enhance:
                                                 </p>
                                                 <div className="flex flex-wrap gap-2">
                                                     {detectedPluginsList.map((plugin, i) => (
-                                                        <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 border border-amber-200 rounded-lg text-sm font-medium text-amber-800">
-                                                            <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                                        <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 border border-blue-200 rounded-lg text-sm font-medium text-blue-800 backdrop-blur-sm">
+                                                            <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                                             </svg>
                                                             {plugin}
                                                         </span>
                                                     ))}
                                                 </div>
                                             </div>
-                                            <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
-                                                <h4 className="text-sm font-semibold text-gray-900 mb-1.5">How to resolve this:</h4>
-                                                <ol className="text-sm text-gray-600 space-y-1 list-decimal list-inside">
-                                                    <li>Go to your WordPress admin dashboard</li>
-                                                    <li>Navigate to <strong>Plugins</strong></li>
-                                                    <li>Disable or delete <strong>{detectedPluginsList.join(", ")}</strong></li>
-                                                </ol>
-                                            </div>
-                                            <div className="mt-4 flex items-center gap-3">
-                                                <button
-                                                    onClick={handleRecheckPlugins}
-                                                    disabled={recheckingPlugins}
-                                                    className="inline-flex justify-center items-center gap-2 min-w-[160px] px-4 py-2 text-sm font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-colors disabled:opacity-60"
-                                                >
-                                                    {recheckingPlugins ? (
-                                                        <div className="w-4 h-4 border-2 border-amber-300 border-t-amber-600 rounded-full animate-spin"></div>
-                                                    ) : (
-                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                                        </svg>
-                                                    )}
-                                                    {recheckingPlugins ? 'Checking...' : 'Re-check Plugins'}
-                                                </button>
-                                                <p className="text-xs text-gray-500">
-                                                    Click after removing the plugin to verify
-                                                </p>
-                                            </div>
+                                            <p className="text-sm text-gray-600 mt-2">
+                                                We detected you use an existing SEO plugin. No worries! Our AI seamlessly works with it to optimize your sitemap without negatively affecting your current setup.
+                                            </p>
                                         </div>
                                     </div>
                                 )}
@@ -1387,7 +1408,7 @@ export default function SiteDashboardPage() {
                                         <div>
                                             <h3 className="text-lg font-semibold text-gray-900 mb-1">Optimize Your Sitemap</h3>
                                             <p className="text-sm text-gray-600 max-w-xl">
-                                                Exclude <span className="font-semibold text-gray-900">{stats.total404s} broken links</span> and <span className="font-semibold text-gray-900">{stats.noindexCount} noindex pages</span> from your sitemap to automatically improve your crawl budget.
+                                                Exclude <span className="font-semibold text-gray-900">{stats.total404s} broken links</span>, <span className="font-semibold text-gray-900">{stats.noindexCount} noindex pages</span> and include <span className="font-semibold text-gray-900">{stats.missingCount} missing URLs</span> in your sitemap to automatically improve your crawl budget and SEO.
                                             </p>
                                         </div>
                                         <div className="flex flex-col items-center gap-2">
@@ -1406,12 +1427,8 @@ export default function SiteDashboardPage() {
                                             ) : (
                                                 <button
                                                     onClick={handleOptimizeSitemap}
-                                                    disabled={sitemapLoading || !pluginConnected || seoPluginsDetected}
-                                                    className={`px-6 py-2.5 text-sm font-medium text-white rounded-xl transition-all shadow-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap ${
-                                                        seoPluginsDetected
-                                                            ? 'bg-gray-400 shadow-none cursor-not-allowed'
-                                                            : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 shadow-emerald-500/25'
-                                                    }`}
+                                                    disabled={sitemapLoading || !pluginConnected}
+                                                    className={`px-6 py-2.5 text-sm font-medium text-white rounded-xl transition-all shadow-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 shadow-emerald-500/25`}
                                                 >
                                                     {sitemapLoading ? (
                                                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
@@ -1432,7 +1449,7 @@ export default function SiteDashboardPage() {
                                             {sitemapSuggestions.length > 0 && (
                                                 <button
                                                     onClick={handleOptimizeSitemap}
-                                                    disabled={sitemapLoading || !pluginConnected || seoPluginsDetected}
+                                                    disabled={sitemapLoading || !pluginConnected}
                                                     className="text-xs text-gray-500 hover:text-gray-700 underline mt-1 disabled:opacity-50 disabled:no-underline"
                                                 >
                                                     {sitemapLoading ? "Re-optimizing..." : "Re-optimize Sitemap"}
@@ -1442,61 +1459,121 @@ export default function SiteDashboardPage() {
                                     </div>
 
                                     {/* Preview Stats / Current Stats */}
-                                    <div className={`grid grid-cols-1 sm:grid-cols-3 gap-4 ${sitemapSuggestions.length === 0 ? 'opacity-80' : ''}`}>
-                                        <div className={`rounded-xl p-4 border relative overflow-hidden group ${sitemapSuggestions.length > 0 ? 'bg-indigo-50/50 border-indigo-100' : 'bg-gray-50 border-gray-100'}`}>
+                                    <div className={`grid grid-cols-2 lg:grid-cols-4 gap-3 ${sitemapSuggestions.length === 0 ? 'opacity-80' : ''}`}>
+                                        <div className={`rounded-xl p-3 border relative overflow-hidden group ${sitemapSuggestions.length > 0 ? 'bg-indigo-50/50 border-indigo-100' : 'bg-gray-50 border-gray-100'}`}>
                                             {sitemapSuggestions.length > 0 && <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-indigo-500 to-blue-500 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>}
-                                            <p className={`text-xs font-semibold uppercase tracking-wider mb-1 flex items-center gap-1.5 ${sitemapSuggestions.length > 0 ? 'text-indigo-800' : 'text-gray-500'}`}>
-                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <p className={`text-[10px] font-bold uppercase tracking-wider mb-0.5 flex items-center gap-1 ${sitemapSuggestions.length > 0 ? 'text-indigo-800' : 'text-gray-500'}`}>
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                                 </svg>
-                                                {sitemapSuggestions.length > 0 ? "Clean URLs Published" : "Potential Clean URLs"}
+                                                {sitemapSuggestions.length > 0 ? "Clean URLs" : "Clean URLs"}
                                             </p>
-                                            <div className="flex items-end gap-2">
-                                                <span className={`text-2xl font-bold ${sitemapSuggestions.length > 0 ? 'text-indigo-900' : 'text-gray-700'}`}>
+                                            <div className="flex items-end gap-1">
+                                                <span className={`text-xl font-bold ${sitemapSuggestions.length > 0 ? 'text-indigo-900' : 'text-gray-700'}`}>
                                                     {sitemapSuggestions.length > 0 ? sitemapSuggestions[0].total_urls : `~${Math.max(0, stats.totalPages - stats.total404s - stats.noindexCount)}`}
                                                 </span>
                                             </div>
                                         </div>
 
-                                        <div className="bg-rose-50/50 rounded-xl p-4 border border-rose-100 relative overflow-hidden group">
+                                        <div className="bg-rose-50/50 rounded-xl p-3 border border-rose-100 relative overflow-hidden group">
                                             {sitemapSuggestions.length > 0 && <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-rose-500 to-red-500 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>}
-                                            <p className="text-xs font-semibold text-rose-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <p className="text-[10px] font-bold text-rose-800/70 uppercase tracking-wider mb-0.5 flex items-center gap-1">
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                                                 </svg>
-                                                {sitemapSuggestions.length > 0 ? "404s Removed" : "To Remove: 404s"}
+                                                {sitemapSuggestions.length > 0 ? "404s Removed" : "404s To Remove"}
                                             </p>
-                                            <div className="flex items-end gap-2">
-                                                <span className="text-2xl font-bold text-rose-900">{stats.total404s}</span>
+                                            <div className="flex items-end gap-1">
+                                                <span className="text-xl font-bold text-rose-900">{stats.total404s}</span>
                                             </div>
                                         </div>
 
-                                        <div className="bg-amber-50/50 rounded-xl p-4 border border-amber-100 relative overflow-hidden group">
+                                        <div className="bg-amber-50/50 rounded-xl p-3 border border-amber-100 relative overflow-hidden group">
                                             {sitemapSuggestions.length > 0 && <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-amber-500 to-orange-500 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>}
-                                            <p className="text-xs font-semibold text-amber-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <p className="text-[10px] font-bold text-amber-800/70 uppercase tracking-wider mb-0.5 flex items-center gap-1">
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                                                 </svg>
-                                                {sitemapSuggestions.length > 0 ? "NoIndex Removed" : "To Remove: NoIndex"}
+                                                {sitemapSuggestions.length > 0 ? "NoIndex Removed" : "NoIndex to Remove"}
                                             </p>
-                                            <div className="flex items-end gap-2">
-                                                <span className="text-2xl font-bold text-amber-900">{stats.noindexCount}</span>
+                                            <div className="flex items-end gap-1">
+                                                <span className="text-xl font-bold text-amber-900">{stats.noindexCount}</span>
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-blue-50/50 rounded-xl p-3 border border-blue-100 relative overflow-hidden group">
+                                            {sitemapSuggestions.length > 0 && <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-blue-500 to-cyan-500 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>}
+                                            <p className="text-[10px] font-bold text-blue-800/70 uppercase tracking-wider mb-0.5 flex items-center gap-1">
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                                </svg>
+                                                {sitemapSuggestions.length > 0 ? "Missing Added" : "Missing to Add"}
+                                            </p>
+                                            <div className="flex items-end gap-1">
+                                                <span className="text-xl font-bold text-blue-900">{stats.missingCount}</span>
                                             </div>
                                         </div>
                                     </div>
 
                                     {/* Success Banner if Optimized */}
                                     {sitemapSuggestions.length > 0 && (
-                                        <div className="mt-6 pt-5 border-t border-gray-100 flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50/50 p-4 rounded-xl border border-emerald-100/50">
-                                            <svg className="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                            </svg>
-                                            Your sitemap is currently optimized and live. Last updated: {new Date(sitemapSuggestions[0].created_at).toLocaleDateString()}
+                                        <div className="mt-6 pt-5 border-t border-gray-100 flex items-center justify-between gap-4 bg-emerald-50/50 p-4 rounded-xl border border-emerald-100/50">
+                                            <div className="flex items-center gap-2 text-sm text-emerald-700">
+                                                <svg className="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                </svg>
+                                                <span>Your sitemap is currently optimized and live. Last updated: {new Date(sitemapSuggestions[0].created_at).toLocaleDateString()}</span>
+                                            </div>
+                                            <button
+                                                onClick={handleUndoSitemap}
+                                                disabled={undoLoading || sitemapLoading}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-600 bg-white hover:bg-gray-50 border border-gray-200 rounded-lg transition-all shadow-sm disabled:opacity-50"
+                                            >
+                                                {undoLoading ? (
+                                                    <div className="w-3 h-3 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
+                                                ) : (
+                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                                                    </svg>
+                                                )}
+                                                Undo Changes
+                                            </button>
                                         </div>
                                     )}
 
-                                    {!seoPluginsDetected && (
+                                    {/* --- DEBUG SECTION --- */}
+                                    <div className="mt-8 border border-gray-100 rounded-xl overflow-hidden bg-white p-6 shadow-sm">
+                                        <h3 className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                                            <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                                            </svg>
+                                            Debug / Manual Sitemap Test
+                                        </h3>
+                                        <p className="text-xs text-gray-500 mb-4">
+                                            Manually push a URL to your live WordPress sitemap to test the integration.
+                                        </p>
+                                        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                                            <input
+                                                type="url"
+                                                placeholder="https://yourdomain.com/test-page"
+                                                value={debugUrl}
+                                                onChange={(e) => setDebugUrl(e.target.value)}
+                                                className="flex-1 px-4 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-shadow bg-gray-50"
+                                            />
+                                            <button
+                                                onClick={() => handleDebugAdd(debugUrl)}
+                                                disabled={!debugUrl || sitemapLoading}
+                                                className="px-5 py-2 whitespace-nowrap bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 rounded-xl text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                                </svg>
+                                                Add to Sitemap
+                                            </button>
+                                        </div>
+                                    </div>
+
                                     <div className="mt-8 border border-gray-100 rounded-xl overflow-hidden bg-white">
                                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 border-b border-gray-100 bg-gray-50/50">
                                             <div className="flex items-center gap-2.5">
@@ -1530,6 +1607,12 @@ export default function SiteDashboardPage() {
                                                         className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${sitemapIssuesFilter === 'noindex' ? 'bg-white text-amber-700 shadow-sm border border-amber-100' : 'text-gray-500 hover:text-gray-700'}`}
                                                     >
                                                         NoIndex Pages
+                                                    </button>
+                                                    <button
+                                                        onClick={() => { setSitemapIssuesFilter('missing'); setSitemapIssuesPage(1); }}
+                                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${sitemapIssuesFilter === 'missing' ? 'bg-white text-blue-700 shadow-sm border border-blue-100' : 'text-gray-500 hover:text-gray-700'}`}
+                                                    >
+                                                        Missing URLs
                                                     </button>
                                                 </div>
                                             )}
@@ -1578,9 +1661,13 @@ export default function SiteDashboardPage() {
                                                                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">
                                                                                     Broken
                                                                                 </span>
-                                                                            ) : (
+                                                                            ) : item.type === 'noindex' ? (
                                                                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">
                                                                                     NoIndex
+                                                                                </span>
+                                                                            ) : (
+                                                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                                                                                    Missing
                                                                                 </span>
                                                                             )}
                                                                         </td>
@@ -1715,7 +1802,6 @@ export default function SiteDashboardPage() {
                                             </div>
                                         )}
                                     </div>
-                                    )}
                                 </div>
 
                             </div>

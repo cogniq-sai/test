@@ -19,10 +19,16 @@ export interface NoindexLinkItem {
     title?: string;
 }
 
+export interface MissingLinkItem {
+    url: string;
+    title?: string;
+}
+
 export interface SitemapIssuesResponse {
     success: boolean;
     broken_links: BrokenLinkItem[];
     noindex_links: NoindexLinkItem[];
+    missing_links: MissingLinkItem[];
     error?: string;
 }
 
@@ -103,5 +109,26 @@ export async function updateSitemapStatus(
  */
 export async function getSitemapIssues(token: string, siteId: string): Promise<SitemapIssuesResponse> {
     const data = await authRequest<SitemapIssuesResponse>(`/sitemap/issues?siteId=${siteId}`, token);
+    return data;
+}
+/**
+ * Undo the last approved sitemap optimization
+ */
+export async function undoSitemapOptimization(token: string, siteId: string): Promise<UpdateSitemapStatusResponse> {
+    const data = await authRequest<UpdateSitemapStatusResponse>(`/sitemap/undo`, token, {
+        method: "POST",
+        body: JSON.stringify({ siteId })
+    });
+    return data;
+}
+
+/**
+ * Debug: Manually add a single URL to the sitemap delta to test WP sync
+ */
+export async function debugSitemapAdd(token: string, siteId: string, url: string): Promise<UpdateSitemapStatusResponse> {
+    const data = await authRequest<UpdateSitemapStatusResponse>(`/sitemap/debug-add`, token, {
+        method: "POST",
+        body: JSON.stringify({ siteId, url })
+    });
     return data;
 }
