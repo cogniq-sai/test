@@ -69,6 +69,45 @@ export default function SiteDashboardPage() {
     const [auditFilter, setAuditFilter] = useState<"All" | "High" | "Medium" | "Low">("All");
     const [fixingIds, setFixingIds] = useState<Record<string, boolean>>({});
 
+    // Apply One-Click Fix
+    const handleApplyFix = async (rec: AuditRecommendation, pageUrl: string) => {
+        if (!token || !siteId || !rec.field || !rec.suggested_value) return;
+        
+        const fixKey = `${pageUrl}-${rec.field}`;
+        setFixingIds(prev => ({ ...prev, [fixKey]: true }));
+        
+        try {
+            const request: MetadataFixRequest = {
+    site_id: siteId,
+    page_url: pageUrl,
+    field: rec.field as "title" | "description" | "h1",
+    suggested_value: rec.suggested_value
+};
+
+const response = await applyFix(token, request);
+            
+            if (response.success) {
+                // Update local UI state
+                setSiteAudits(prevAudits => prevAudits.map(audit => {
+                    if (audit.url !== pageUrl) return audit;
+                    // Remove the fixed recommendation
+                    return {
+                        ...audit,
+                        recommendations: audit.recommendations.filter(r => r !== rec)
+                    };
+                }));
+                alert(`Successfully updated metadata on WordPress!`);
+            } else {
+                throw new Error(response.message || "Failed to apply fix");
+            }
+        } catch (error) {
+            console.error("Failed to apply fix:", error);
+            alert(`Failed to apply fix: ${error instanceof Error ? error.message : "Unknown error"}`);
+        } finally {
+            setFixingIds(prev => ({ ...prev, [fixKey]: false }));
+        }
+    };
+
     // Sitemap Optimization state
     const [sitemapSuggestions, setSitemapSuggestions] = useState<SitemapSuggestion[]>([]);
     const [sitemapLoading, setSitemapLoading] = useState(false);
