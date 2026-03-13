@@ -1,0 +1,2 @@
+app/dashboard/site/[id]/page.tsx(101,42): error TS2339: Property 'error' does not exist on type 'MetadataFixResponse'.
+app/lib/api/notifications.ts(14,19): error TS2304: Cannot find name 'int'.

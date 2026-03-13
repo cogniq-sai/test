@@ -11,7 +11,7 @@ export interface Notification {
 export interface GetNotificationsResponse {
     success: boolean;
     notifications: Notification[];
-    unread_count: int;
+    unread_count: number;
 }
 
 /**
