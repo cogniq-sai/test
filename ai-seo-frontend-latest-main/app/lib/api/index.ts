@@ -19,8 +19,8 @@ export type { SitemapSuggestion, CheckSitemapPluginsResponse, GenerateSitemapSug
 export { getSiteHealth, getSiteReport } from "./analytics";
 export type { SiteHealthResponse, HealthMetrics } from "./analytics";
 
-export { analyzePage, getSiteAudits } from "./audits";
-export type { AuditRecommendation, PageAudit, AnalyzePageResponse } from "./audits";
+export { analyzePage, getSiteAudits, applyFix } from "./audits";
+export type { AuditRecommendation, PageAudit, AnalyzePageResponse, MetadataFixRequest } from "./audits";
 
 export { getUserNotifications, markNotificationRead } from "./notifications";
 export type { Notification, GetNotificationsResponse as NotificationsResponse } from "./notifications";

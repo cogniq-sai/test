@@ -6,13 +6,13 @@ import Link from "next/link";
 import { useAuth } from "../../../context/AuthContext";
 import { useDashboard } from "../../../context/DashboardContext";
 import RedirectTable from "../../../components/dashboard/RedirectTable";
-import { getSites, deleteSite, removeStoredSite, getScanErrors, getAllPages, generateRedirects, getRedirectSuggestions, selectRedirectOption, rejectSuggestion, approveRedirect, undoRedirect, getAllActiveScans, getSiteAudits, analyzePage, getSiteHealth, getSiteReport, applyFix } from "../../../lib/api";
-import type { PageAudit, AuditRecommendation, RedirectSuggestion, MetadataFixRequest } from "../../../lib/api";
+import { getSites, deleteSite, removeStoredSite, getScanErrors, getAllPages, generateRedirects, getRedirectSuggestions, selectRedirectOption, rejectSuggestion, approveRedirect, undoRedirect, getAllActiveScans } from "../../../lib/api";
+import type { RedirectSuggestion } from "../../../lib/api";
 import { checkSitemapPlugins, generateSitemapSuggestion, getSitemapSuggestions, updateSitemapStatus } from "../../../lib/api/sitemap-api";
 import type { SitemapSuggestion } from "../../../lib/api/sitemap-api";
 import ScannerCard from "../../../components/dashboard/ScannerCard";
 import PluginSetupModal from "../../../components/dashboard/PluginSetupModal";
-import HealthTrendsChart from "../../../components/dashboard/HealthTrendsChart";
+
 
 interface SiteInfo {
     id: string;
@@ -61,52 +61,7 @@ export default function SiteDashboardPage() {
     const [isCheckingData, setIsCheckingData] = useState(true); // Loading state for initial data check
     const [isCopied, setIsCopied] = useState(false);
 
-    // AI SEO Audit state
-    const [siteAudits, setSiteAudits] = useState<PageAudit[]>([]);
-    const [siteHealth, setSiteHealth] = useState<any | null>(null);
-    const [isAuditExpanded, setIsAuditExpanded] = useState(false);
-    const [isAuditLoading, setIsAuditLoading] = useState(false);
-    const [auditFilter, setAuditFilter] = useState<"All" | "High" | "Medium" | "Low">("All");
-    const [fixingIds, setFixingIds] = useState<Record<string, boolean>>({});
 
-    // Apply One-Click Fix
-    const handleApplyFix = async (rec: AuditRecommendation, pageUrl: string) => {
-        if (!token || !siteId || !rec.field || !rec.suggested_value) return;
-        
-        const fixKey = `${pageUrl}-${rec.field}`;
-        setFixingIds(prev => ({ ...prev, [fixKey]: true }));
-        
-        try {
-            const request: MetadataFixRequest = {
-    site_id: siteId,
-    page_url: pageUrl,
-    field: rec.field as "title" | "description" | "h1",
-    suggested_value: rec.suggested_value
-};
-
-const response = await applyFix(token, request);
-            
-            if (response.success) {
-                // Update local UI state
-                setSiteAudits(prevAudits => prevAudits.map(audit => {
-                    if (audit.url !== pageUrl) return audit;
-                    // Remove the fixed recommendation
-                    return {
-                        ...audit,
-                        recommendations: audit.recommendations.filter(r => r !== rec)
-                    };
-                }));
-                alert(`Successfully updated metadata on WordPress!`);
-            } else {
-                throw new Error(response.message || "Failed to apply fix");
-            }
-        } catch (error) {
-            console.error("Failed to apply fix:", error);
-            alert(`Failed to apply fix: ${error instanceof Error ? error.message : "Unknown error"}`);
-        } finally {
-            setFixingIds(prev => ({ ...prev, [fixKey]: false }));
-        }
-    };
 
     // Sitemap Optimization state
     const [sitemapSuggestions, setSitemapSuggestions] = useState<SitemapSuggestion[]>([]);
@@ -235,22 +190,7 @@ const response = await applyFix(token, request);
         }
     }, [siteId, token]);
 
-    const fetchAuditData = useCallback(async () => {
-        if (!siteId || !token) return;
-        setIsAuditLoading(true);
-        try {
-            const [health, audits] = await Promise.all([
-                getSiteHealth(token, siteId).catch(() => ({ score: 0, status: 'N/A' })),
-                getSiteAudits(token, siteId).catch(() => [])
-            ]);
-            setSiteHealth(health);
-            setSiteAudits(audits);
-        } catch (error) {
-            console.error("Failed to fetch Audit data:", error);
-        } finally {
-            setIsAuditLoading(false);
-        }
-    }, [siteId, token]);
+
 
     // Trigger AI generation and start polling
     const triggerAiGeneration = useCallback(async () => {
@@ -354,7 +294,6 @@ const response = await applyFix(token, request);
                     // Load existing AI suggestions
                     await fetchAiSuggestions();
                     await fetchSitemapData();
-                    await fetchAuditData();
                 } else if (user?.id) {
                     // Fallback: Check backend scan_status even if no pages/errors in DB
                     // This handles the case where a scan completed but DB writes failed
@@ -887,216 +826,6 @@ const response = await applyFix(token, request);
                                 </div>
                             </div>
                         )}
-
-                        {/* ===== ACCORDION: AI SEO Audit ===== */}
-                        <div className="bg-white/90 backdrop-blur-xl rounded-2xl shadow-lg shadow-gray-200/50 border border-white/60 overflow-hidden mb-6">
-                            <div
-                                className="p-5 cursor-pointer hover:bg-gray-50/80 transition-all duration-200"
-                                onClick={() => setIsAuditExpanded(!isAuditExpanded)}
-                            >
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-indigo-500 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg shadow-purple-500/20">
-                                            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                                            </svg>
-                                        </div>
-                                        <div className="flex-1">
-                                            <div className="flex items-center gap-3">
-                                                <h3 className="text-base font-semibold text-gray-900">AI SEO Audit</h3>
-                                                {siteHealth && (
-                                                    <div className="flex items-center gap-3">
-                                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                                                            siteHealth.score > 80 ? 'bg-emerald-100 text-emerald-700' : 
-                                                            siteHealth.score > 50 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
-                                                        }`}>
-                                                            Health Score: {siteHealth.score}/100
-                                                        </span>
-                                                        <button 
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                // Simple JSON download for now
-                                                                const handleDownload = async () => {
-                                                                    try {
-                                                                        const report = await getSiteReport(token || "", siteId);
-                                                                        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(report, null, 2));
-                                                                        const downloadAnchorNode = document.createElement('a');
-                                                                        downloadAnchorNode.setAttribute("href", dataStr);
-                                                                        downloadAnchorNode.setAttribute("download", `seo_report_${siteId}.json`);
-                                                                        document.body.appendChild(downloadAnchorNode);
-                                                                        downloadAnchorNode.click();
-                                                                        downloadAnchorNode.remove();
-                                                                    } catch (err) {
-                                                                        console.error("Download failed:", err);
-                                                                        alert("Failed to generate report");
-                                                                    }
-                                                                };
-                                                                handleDownload();
-                                                            }}
-                                                            className="flex items-center gap-1.5 px-3 py-1 text-[11px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors border border-blue-100"
-                                                        >
-                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                                            </svg>
-                                                            EXPORT DATA
-                                                        </button>
-                                                        <Link
-                                                            href={`/dashboard/site/${siteId}/report`}
-                                                            onClick={(e) => e.stopPropagation()}
-                                                            className="flex items-center gap-1.5 px-3 py-1 text-[11px] font-bold text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors border border-purple-100"
-                                                        >
-                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                                            </svg>
-                                                            VIEW REPORT
-                                                        </Link>
-                                                    </div>
-                                                )}
-                                            </div>
-                                            {!isAuditExpanded && (
-                                                <p className="text-sm text-gray-500 mt-0.5">
-                                                    AI-driven content optimization and metadata suggestions
-                                                </p>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <svg
-                                        className={`w-5 h-5 text-gray-400 transition-transform duration-300 ${isAuditExpanded ? 'rotate-180' : ''}`}
-                                        fill="none"
-                                        stroke="currentColor"
-                                        viewBox="0 0 24 24"
-                                    >
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                    </svg>
-                                </div>
-                            </div>
-
-                            <div className={`transition-all duration-300 ease-in-out overflow-hidden ${isAuditExpanded ? 'max-h-[3000px] opacity-100' : 'max-h-0 opacity-0'}`}>
-                                <div className="border-t border-gray-100 p-6">
-                                    {isAuditLoading ? (
-                                        <div className="flex flex-col items-center justify-center py-12">
-                                            <div className="w-12 h-12 border-4 border-purple-100 border-t-purple-600 rounded-full animate-spin"></div>
-                                            <p className="mt-4 text-gray-500">Retrieving AI insights...</p>
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-6">
-                                            {/* Health Trends */}
-                                            {siteHealth?.history && siteHealth.history.length > 0 && (
-                                                <div className="mb-2">
-                                                    <HealthTrendsChart history={siteHealth.history} />
-                                                </div>
-                                            )}
-
-                                            {/* Health Summary */}
-                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100">
-                                                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Status</p>
-                                                    <p className="text-lg font-bold text-slate-900">{siteHealth?.status || 'Active'}</p>
-                                                </div>
-                                                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 col-span-2">
-                                                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">AI Recommendation</p>
-                                                    <p className="text-sm text-slate-700">
-                                                        {siteHealth && siteHealth.score > 90 
-                                                            ? "Your site has excellent SEO health! Regular monitoring will help maintain this." 
-                                                            : "Focus on fixing missing H1 tags and meta descriptions to improve your search visibility."}
-                                                    </p>
-                                                </div>
-                                            </div>
-
-                                            {/* Top Recommendations */}
-                                            <div>
-                                                <h4 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2">
-                                                    <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                                                    </svg>
-                                                    Prioritized SEO Actions
-                                                </h4>
-                                                
-                                                {/* Priority Filters */}
-                                                <div className="flex gap-2 mb-4">
-                                                    {(["All", "High", "Medium", "Low"] as const).map((p) => (
-                                                        <button
-                                                            key={p}
-                                                            onClick={() => setAuditFilter(p)}
-                                                            className={`px-3 py-1 text-xs font-bold rounded-full transition-all border ${
-                                                                auditFilter === p 
-                                                                    ? 'bg-purple-600 text-white border-purple-600 shadow-sm' 
-                                                                    : 'bg-white text-gray-600 border-gray-200 hover:border-purple-200 hover:text-purple-600'
-                                                            }`}
-                                                        >
-                                                            {p}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                                
-                                                {siteAudits.length === 0 ? (
-                                                    <div className="p-8 text-center bg-gray-50 rounded-2xl border border-dashed border-gray-200">
-                                                        <p className="text-gray-500 text-sm">No critical content issues identified by AI yet.</p>
-                                                    </div>
-                                                ) : (
-                                                    <div className="space-y-3">
-                                                        {siteAudits
-                                                            .flatMap(audit => audit.recommendations)
-                                                            .filter(rec => auditFilter === "All" || rec.priority === auditFilter)
-                                                            .slice(0, 5)
-                                                            .map((rec, i) => {
-                                                                const auditItem = siteAudits.find(a => a.recommendations.includes(rec));
-                                                                const pageUrl = auditItem?.url || "";
-                                                                const fixKey = `${pageUrl}-${rec.field}`;
-                                                                const isFixing = fixingIds[fixKey];
-                                                                const canFix = !!(rec.field && rec.suggested_value && pluginConnected);
-
-                                                                return (
-                                                                    <div key={i} className="flex gap-4 p-4 rounded-xl border border-gray-100 bg-white hover:shadow-md transition-shadow group">
-                                                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                                                                            rec.priority === 'High' ? 'bg-red-50 text-red-600' : 
-                                                                            rec.priority === 'Medium' ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'
-                                                                        }`}>
-                                                                            <span className="text-[10px] font-bold">{rec.priority[0]}</span>
-                                                                        </div>
-                                                                        <div className="flex-1">
-                                                                            <h5 className="text-sm font-semibold text-gray-900">{rec.issue || `Optimize ${rec.field}`}</h5>
-                                                                            <p className="text-xs text-gray-600 mt-1">{rec.suggestion || rec.reasoning}</p>
-                                                                            {rec.suggested_value && (
-                                                                                <div className="mt-2 text-[10px] p-2 bg-slate-50 rounded border border-slate-100 font-mono text-slate-600">
-                                                                                    Suggest: {rec.suggested_value}
-                                                                                </div>
-                                                                            )}
-                                                                        </div>
-                                                                        {canFix && (
-                                                                            <div className="flex-shrink-0 self-center">
-                                                                                <button
-                                                                                    onClick={() => handleApplyFix(rec, pageUrl)}
-                                                                                    disabled={isFixing}
-                                                                                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
-                                                                                        isFixing 
-                                                                                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                                                                                            : 'bg-purple-50 text-purple-700 hover:bg-purple-600 hover:text-white border border-purple-200 shadow-sm'
-                                                                                    }`}
-                                                                                >
-                                                                                    {isFixing ? (
-                                                                                        <div className="w-3 h-3 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin"></div>
-                                                                                    ) : (
-                                                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                                                                        </svg>
-                                                                                    )}
-                                                                                    {isFixing ? 'Fixing...' : 'Fix Now'}
-                                                                                </button>
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
 
                         {/* ===== ACCORDION 2: Crawled Pages ===== */}
                         <div className="bg-white/90 backdrop-blur-xl rounded-2xl shadow-lg shadow-gray-200/50 border border-white/60 overflow-hidden mb-6">
