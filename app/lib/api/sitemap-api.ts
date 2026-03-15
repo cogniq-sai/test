@@ -6,6 +6,8 @@ export interface SitemapSuggestion {
     total_urls: number;
     created_at: string;
     reviewed_at: string | null;
+    added_urls?: string[];
+    removed_urls?: string[];
 }
 
 export interface BrokenLinkItem {

@@ -1412,7 +1412,7 @@ export default function SiteDashboardPage() {
                                             </p>
                                         </div>
                                         <div className="flex flex-col items-center gap-2">
-                                            {sitemapSuggestions.length > 0 ? (
+                                            {sitemapSuggestions.length > 0 && sitemapSuggestions[0].approval_status === 'approved' ? (
                                                 <a
                                                     href={`${siteInfo?.url.replace(/\/$/, '')}/sitemap.xml`}
                                                     target="_blank"
@@ -1446,7 +1446,7 @@ export default function SiteDashboardPage() {
                                                     Plugin required to optimize
                                                 </p>
                                             )}
-                                            {sitemapSuggestions.length > 0 && (
+                                            {sitemapSuggestions.length > 0 && sitemapSuggestions[0].approval_status === 'approved' && (
                                                 <button
                                                     onClick={handleOptimizeSitemap}
                                                     disabled={sitemapLoading || !pluginConnected}
@@ -1459,56 +1459,52 @@ export default function SiteDashboardPage() {
                                     </div>
 
                                     {/* Preview Stats / Current Stats */}
-                                    <div className={`grid grid-cols-2 lg:grid-cols-4 gap-3 ${sitemapSuggestions.length === 0 ? 'opacity-80' : ''}`}>
-                                        <div className={`rounded-xl p-3 border relative overflow-hidden group ${sitemapSuggestions.length > 0 ? 'bg-indigo-50/50 border-indigo-100' : 'bg-gray-50 border-gray-100'}`}>
-                                            {sitemapSuggestions.length > 0 && <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-indigo-500 to-blue-500 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>}
-                                            <p className={`text-[10px] font-bold uppercase tracking-wider mb-0.5 flex items-center gap-1 ${sitemapSuggestions.length > 0 ? 'text-indigo-800' : 'text-gray-500'}`}>
+                                    <div className={`grid grid-cols-2 lg:grid-cols-4 gap-3 ${sitemapSuggestions.length === 0 || sitemapSuggestions[0].approval_status !== 'approved' ? 'opacity-80' : ''}`}>
+                                        <div className={`rounded-xl p-3 border relative overflow-hidden ${sitemapSuggestions.length > 0 && sitemapSuggestions[0].approval_status === 'approved' ? 'bg-indigo-50/50 border-indigo-100' : 'bg-gray-50 border-gray-100'}`}>
+                                            <p className={`text-[10px] font-bold uppercase tracking-wider mb-0.5 flex items-center gap-1 ${sitemapSuggestions.length > 0 && sitemapSuggestions[0].approval_status === 'approved' ? 'text-indigo-800' : 'text-gray-500'}`}>
                                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                                 </svg>
-                                                {sitemapSuggestions.length > 0 ? "Clean URLs" : "Clean URLs"}
+                                                {sitemapSuggestions.length > 0 && sitemapSuggestions[0].approval_status === 'approved' ? "Clean URLs" : "Clean URLs"}
                                             </p>
                                             <div className="flex items-end gap-1">
-                                                <span className={`text-xl font-bold ${sitemapSuggestions.length > 0 ? 'text-indigo-900' : 'text-gray-700'}`}>
-                                                    {sitemapSuggestions.length > 0 ? sitemapSuggestions[0].total_urls : `~${Math.max(0, stats.totalPages - stats.total404s - stats.noindexCount)}`}
+                                                <span className={`text-xl font-bold ${sitemapSuggestions.length > 0 && sitemapSuggestions[0].approval_status === 'approved' ? 'text-indigo-900' : 'text-gray-700'}`}>
+                                                    {sitemapSuggestions.length > 0 && sitemapSuggestions[0].approval_status === 'approved' ? sitemapSuggestions[0].total_urls : `~${Math.max(0, stats.totalPages - stats.total404s - stats.noindexCount)}`}
                                                 </span>
                                             </div>
                                         </div>
 
-                                        <div className="bg-rose-50/50 rounded-xl p-3 border border-rose-100 relative overflow-hidden group">
-                                            {sitemapSuggestions.length > 0 && <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-rose-500 to-red-500 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>}
+                                        <div className="bg-rose-50/50 rounded-xl p-3 border border-rose-100 relative overflow-hidden">
                                             <p className="text-[10px] font-bold text-rose-800/70 uppercase tracking-wider mb-0.5 flex items-center gap-1">
                                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                                                 </svg>
-                                                {sitemapSuggestions.length > 0 ? "404s Removed" : "404s To Remove"}
+                                                {sitemapSuggestions.length > 0 && sitemapSuggestions[0].approval_status === 'approved' ? "404s Removed" : "404s To Remove"}
                                             </p>
                                             <div className="flex items-end gap-1">
                                                 <span className="text-xl font-bold text-rose-900">{stats.total404s}</span>
                                             </div>
                                         </div>
 
-                                        <div className="bg-amber-50/50 rounded-xl p-3 border border-amber-100 relative overflow-hidden group">
-                                            {sitemapSuggestions.length > 0 && <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-amber-500 to-orange-500 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>}
+                                        <div className="bg-amber-50/50 rounded-xl p-3 border border-amber-100 relative overflow-hidden">
                                             <p className="text-[10px] font-bold text-amber-800/70 uppercase tracking-wider mb-0.5 flex items-center gap-1">
                                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                                                 </svg>
-                                                {sitemapSuggestions.length > 0 ? "NoIndex Removed" : "NoIndex to Remove"}
+                                                {sitemapSuggestions.length > 0 && sitemapSuggestions[0].approval_status === 'approved' ? "NoIndex Removed" : "NoIndex to Remove"}
                                             </p>
                                             <div className="flex items-end gap-1">
                                                 <span className="text-xl font-bold text-amber-900">{stats.noindexCount}</span>
                                             </div>
                                         </div>
 
-                                        <div className="bg-blue-50/50 rounded-xl p-3 border border-blue-100 relative overflow-hidden group">
-                                            {sitemapSuggestions.length > 0 && <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-blue-500 to-cyan-500 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>}
+                                        <div className="bg-blue-50/50 rounded-xl p-3 border border-blue-100 relative overflow-hidden">
                                             <p className="text-[10px] font-bold text-blue-800/70 uppercase tracking-wider mb-0.5 flex items-center gap-1">
                                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                                                 </svg>
-                                                {sitemapSuggestions.length > 0 ? "Missing Added" : "Missing to Add"}
+                                                {sitemapSuggestions.length > 0 && sitemapSuggestions[0].approval_status === 'approved' ? "Missing Added" : "Missing to Add"}
                                             </p>
                                             <div className="flex items-end gap-1">
                                                 <span className="text-xl font-bold text-blue-900">{stats.missingCount}</span>
@@ -1517,7 +1513,7 @@ export default function SiteDashboardPage() {
                                     </div>
 
                                     {/* Success Banner if Optimized */}
-                                    {sitemapSuggestions.length > 0 && (
+                                    {sitemapSuggestions.length > 0 && sitemapSuggestions[0].approval_status === 'approved' && (
                                         <div className="mt-6 pt-5 border-t border-gray-100 flex items-center justify-between gap-4 bg-emerald-50/50 p-4 rounded-xl border border-emerald-100/50">
                                             <div className="flex items-center gap-2 text-sm text-emerald-700">
                                                 <svg className="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1543,36 +1539,38 @@ export default function SiteDashboardPage() {
                                     )}
 
                                     {/* --- DEBUG SECTION --- */}
-                                    <div className="mt-8 border border-gray-100 rounded-xl overflow-hidden bg-white p-6 shadow-sm">
-                                        <h3 className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
-                                            <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                                            </svg>
-                                            Debug / Manual Sitemap Test
-                                        </h3>
-                                        <p className="text-xs text-gray-500 mb-4">
-                                            Manually push a URL to your live WordPress sitemap to test the integration.
-                                        </p>
-                                        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                                            <input
-                                                type="url"
-                                                placeholder="https://yourdomain.com/test-page"
-                                                value={debugUrl}
-                                                onChange={(e) => setDebugUrl(e.target.value)}
-                                                className="flex-1 px-4 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-shadow bg-gray-50"
-                                            />
-                                            <button
-                                                onClick={() => handleDebugAdd(debugUrl)}
-                                                disabled={!debugUrl || sitemapLoading}
-                                                className="px-5 py-2 whitespace-nowrap bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 rounded-xl text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
-                                            >
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                    {pluginConnected && (
+                                        <div className="mt-8 border border-gray-100 rounded-xl overflow-hidden bg-white p-6 shadow-sm">
+                                            <h3 className="text-sm font-semibold text-purple-700 mb-2 flex items-center gap-2">
+                                                <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
                                                 </svg>
-                                                Add to Sitemap
-                                            </button>
+                                                Debug / Manual Sitemap Test
+                                            </h3>
+                                            <p className="text-xs text-purple-600/80 mb-4">
+                                                Manually push a URL to your live WordPress sitemap to test the integration.
+                                            </p>
+                                            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                                                <input
+                                                    type="url"
+                                                    placeholder="https://yourdomain.com/test-page"
+                                                    value={debugUrl}
+                                                    onChange={(e) => setDebugUrl(e.target.value)}
+                                                    className="flex-1 px-4 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-shadow bg-gray-50 text-purple-700"
+                                                />
+                                                <button
+                                                    onClick={() => handleDebugAdd(debugUrl)}
+                                                    disabled={!debugUrl || sitemapLoading}
+                                                    className="px-5 py-2 whitespace-nowrap bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 rounded-xl text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                                    </svg>
+                                                    Add to Sitemap
+                                                </button>
+                                            </div>
                                         </div>
-                                    </div>
+                                    )}
 
                                     <div className="mt-8 border border-gray-100 rounded-xl overflow-hidden bg-white">
                                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 border-b border-gray-100 bg-gray-50/50">
