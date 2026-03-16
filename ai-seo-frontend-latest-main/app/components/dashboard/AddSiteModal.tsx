@@ -7,14 +7,13 @@ import { addSite } from "../../lib/api";
 interface AddSiteModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onSiteAdded: (siteUrl?: string) => void;
     token: string;
     userId: string;
 }
 
 type ModalStep = "input" | "loading" | "success";
 
-export default function AddSiteModal({ isOpen, onClose, onSiteAdded, token, userId }: AddSiteModalProps) {
+export default function AddSiteModal({ isOpen, onClose, token, userId }: AddSiteModalProps) {
     const [siteUrl, setSiteUrl] = useState("");
     const [step, setStep] = useState<ModalStep>("input");
     const [siteId, setSiteId] = useState("");

@@ -247,7 +247,7 @@ export default function DashboardPage() {
                         <h1 className="text-2xl font-bold text-gray-900">
                             {greeting}
                         </h1>
-                        <p className="text-gray-600 mt-1">Here's an overview of your SEO performance</p>
+                        <p className="text-gray-600 mt-1">Here&apos;s an overview of your SEO performance</p>
                     </div>
                     <div className="flex items-center gap-3">
                         <button
@@ -512,7 +512,6 @@ export default function DashboardPage() {
             <AddSiteModal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
-                onSiteAdded={handleSiteAdded}
                 token={token || ""}
                 userId={user?.id || ""}
             />

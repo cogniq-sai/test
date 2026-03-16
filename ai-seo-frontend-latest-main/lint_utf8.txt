@@ -1,0 +1,66 @@
+
+> ai-seo-frontend@0.1.0 lint
+> next lint
+
+
+./app/components/dashboard/AddSiteModal.tsx
+17:57  Error: 'onSiteAdded' is defined but never used.  @typescript-eslint/no-unused-vars
+
+./app/components/dashboard/PluginSetupModal.tsx
+3:20  Error: 'useEffect' is defined but never used.  @typescript-eslint/no-unused-vars
+
+./app/components/dashboard/ScannerCard.tsx
+47:8  Warning: React Hook useEffect has a missing dependency: 'pollStatus'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/components/dashboard/SearchFilter.tsx
+52:11  Error: 'sortLabels' is assigned a value but never used.  @typescript-eslint/no-unused-vars
+
+./app/context/AuthContext.tsx
+27:23  Error: 'setIsLoading' is assigned a value but never used.  @typescript-eslint/no-unused-vars
+
+./app/context/DashboardContext.tsx
+100:86  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+106:54  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+211:41  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+263:8  Warning: React Hook useEffect has missing dependencies: 'lastFetched' and 'refreshData'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps
+
+./app/dashboard/page.tsx
+8:60  Error: 'Site' is defined but never used.  @typescript-eslint/no-unused-vars
+13:24  Error: 'Activity' is defined but never used.  @typescript-eslint/no-unused-vars
+121:30  Error: 'siteUrl' is defined but never used.  @typescript-eslint/no-unused-vars
+130:15  Error: 'siteToDelete' is assigned a value but never used.  @typescript-eslint/no-unused-vars
+250:63  Error: `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`.  react/no-unescaped-entities
+
+./app/dashboard/site/[id]/page.tsx
+11:81  Error: 'updateSitemapStatus' is defined but never used.  @typescript-eslint/no-unused-vars
+42:12  Error: 'scanProgress' is assigned a value but never used.  @typescript-eslint/no-unused-vars
+259:79  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+281:88  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+322:8  Warning: React Hook useEffect has a missing dependency: 'fetchSitemapData'. Either include it or remove the dependency array.  react-hooks/exhaustive-deps
+329:75  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+362:8  Warning: React Hook useEffect has missing dependencies: 'fetchDiscoveredPages' and 'fetchScanResults'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps
+376:11  Error: 'handleStartScan' is assigned a value but never used.  @typescript-eslint/no-unused-vars
+478:65  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+565:40  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+1268:111  Error: `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`.  react/no-unescaped-entities
+
+./app/dashboard/site/[id]/report/page.tsx
+13:42  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+54:60  Error: `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`.  react/no-unescaped-entities
+
+./app/lib/api/analytics.ts
+32:77  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+33:24  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+
+./app/lib/api/config.ts
+48:14  Error: 'error' is defined but never used.  @typescript-eslint/no-unused-vars
+
+./app/lib/api/scan.ts
+70:74  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+71:24  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+
+./app/lib/api/sitemap-api.ts
+1:23  Error: 'ApiError' is defined but never used.  @typescript-eslint/no-unused-vars
+36:12  Error: Unexpected any. Specify a different type.  @typescript-eslint/no-explicit-any
+
+info  - Need to disable some ESLint rules? Learn more here: https://nextjs.org/docs/basic-features/eslint#disabling-rules

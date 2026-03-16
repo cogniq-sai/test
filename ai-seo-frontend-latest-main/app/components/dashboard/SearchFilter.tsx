@@ -49,10 +49,7 @@ export default function SearchFilter({
         'never-scanned': 'Never Scanned'
     };
 
-    const sortLabels = {
-        'last-scanned': 'Last Scanned',
-        'alphabetical': 'Alphabetical'
-    };
+
 
     return (
         <div className="bg-white rounded-2xl border-2 border-gray-200 p-4 mb-6">

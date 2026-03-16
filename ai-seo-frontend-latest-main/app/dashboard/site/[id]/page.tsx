@@ -1265,7 +1265,7 @@ export default function SiteDashboardPage() {
                                             <h4 className="text-sm font-semibold text-amber-900">Conflicting Plugins Detected</h4>
                                             <p className="text-sm text-amber-800 mt-1">
                                                 We detected the following active SEO plugins: <span className="font-semibold">{detectedPluginsList.join(", ")}</span>.
-                                                Please disable their sitemap functionality to use AutoRankr AI's optimized sitemap.
+                                                Please disable their sitemap functionality to use AutoRankr AI&apos;s optimized sitemap.
                                             </p>
                                         </div>
                                     </div>

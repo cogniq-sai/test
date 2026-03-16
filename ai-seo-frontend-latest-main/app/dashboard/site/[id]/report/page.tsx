@@ -51,7 +51,7 @@ export default function SiteReportPage() {
         return (
             <div className="min-h-screen bg-white flex flex-col items-center justify-center p-4">
                 <h1 className="text-2xl font-bold text-gray-900 mb-2">Report Not Found</h1>
-                <p className="text-gray-500 mb-6">We couldn't generate the report for this site.</p>
+                <p className="text-gray-500 mb-6">We couldn&apos;t generate the report for this site.</p>
                 <Link href={`/dashboard/site/${siteId}`} className="text-blue-600 font-bold hover:underline">
                     Return to Dashboard
                 </Link>
